@@ -47,107 +47,18 @@ const getAccessToken = async (req, res, next) => {
     }
 };
 // POST: /payment/pay
-// router.post('/pay', getAccessToken, async (req, res) => {
-//     const { number_plate, phone_number } = req.body;
-
-//     //check if valid kenyan phone number
-//     const phoneRegex = /^(2547|07)\d{8}$/;
-//     if (!phoneRegex.test(phone_number)) {
-//         return res.status(400).json({ error: "Invalid Kenyan phone number." });
-//     }
-
-
-//     //plate should only contain letters and numbers not more tha 8 characters
-//     const plateRegex = /^[A-Z0-9]{1,8}$/i;
-//     if (!plateRegex.test(number_plate)) {
-//         return res.status(400).json({ error: "Invalid number plate." });
-//     }
-
-
-//     const amount = 10; // Set your parking fee here
-//     const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
-//     const password = Buffer.from(`${process.env.MPESA_PAYBILL}${process.env.MPESA_PASSKEY}${timestamp}`).toString('base64');
-
-//     try {
-//         //generate temp checkout ID from phone number and timestamp
-//         const tempCheckoutID = `${phone_number}_${timestamp}`;
-
-//         const record = await Transaction.create({
-//             number_plate,
-//             phone_number,
-//             amount,
-//             status: 'PENDING',
-//             checkoutID: tempCheckoutID, // You should update this with the actual checkout ID from the response
-//             Transaction_timestamp: new Date()
-//         });
-
-//         //write transaction to txt file
-//         fs.appendFile('transactions.txt', JSON.stringify(record) + '\n', (err) => {
-//             if (err) console.error("Failed to save transaction data.");
-//         });
-
-//         // 2. Initiate STK Push
-//         const stkResponse = await axios.post(
-//             'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest', // Changed to sandbox
-//             {
-//                 BusinessShortCode: process.env.MPESA_SHORTCODE, // Use 174379 for Sandbox
-//                 Password: password,
-//                 Timestamp: timestamp,
-//                 TransactionType: "CustomerPayBillOnline",
-//                 Amount: amount,
-//                 PartyA: phone_number,
-//                 PartyB: process.env.MPESA_PAYBILL,
-//                 PhoneNumber: phone_number,
-//                 CallBackURL: "https://4704-197-248-235-117.ngrok-free.app/mpesa/callback",
-//                 AccountReference: number_plate,
-//                 TransactionDesc: `Parking fee for ${number_plate}`
-//             },
-//             {
-//                 headers: {
-//                     'Authorization': `Bearer ${req.token}`,
-//                     'Content-Type': 'application/json'
-//                 }
-//             }
-//         );
-
-
-//         //update transaction with actual checkout ID from response
-//         record.checkoutID = stkResponse.data.CheckoutRequestID;
-//         await record.save();
-
-//         //load stkpayload to txt file
-//         fs.appendFile('stk_payloads.txt', JSON.stringify(stkResponse.data) + '\n', (err) => {
-//             if (err) console.error("Failed to save STK payload data.");
-//         });
-
-//         console.log("response from mpesa:", stkResponse.data);
-
-//         res.status(200).json({ message: "STK Push initiated", checkoutID: stkResponse.data.CheckoutRequestID });
-//     } catch (error) {
-
-//         console.error("Error processing payment:", error);
-
-//         //write error to txt file
-//         fs.appendFile('errors.txt', JSON.stringify({ error: error.message, timestamp: new Date() }) + '\n', (err) => {
-//             if (err) console.error("Failed to save error data.");
-//         });
-
-//         res.status(500).json({ error: error.message });
-//     }
-// });
-
 router.post('/pay', getAccessToken, async (req, res) => {
     try {
         let { number_plate, phone_number } = req.body;
 
-        // 1. Sanitize & Validate Phone Number (Convert 07... to 2547...)
+        // 1. Sanitize & Validate Phone Number
         if (phone_number.startsWith('0')) {
             phone_number = '254' + phone_number.substring(1);
         }
         
         const phoneRegex = /^(2547|2541)\d{8}$/;
         if (!phoneRegex.test(phone_number)) {
-            return res.status(400).json({ error: "Invalid Kenyan phone number. Use 2547XXXXXXXX format." });
+            return res.status(400).json({ error: "Invalid Kenyan phone number." });
         }
 
         // 2. Validate Number Plate
@@ -156,20 +67,23 @@ router.post('/pay', getAccessToken, async (req, res) => {
             return res.status(400).json({ error: "Invalid number plate." });
         }
 
-        // 3. M-Pesa Constants (Use Sandbox defaults if .env is missing them)
+        // 3. M-Pesa Constants
         const shortCode = process.env.MPESA_SHORTCODE || "174379";
-        const passkey = process.env.MPESA_PASSKEY; // Get from Daraja Sandbox tab
-        const amount = 1; // Testing with 1 Shilling
+        const passkey = process.env.MPESA_PASSKEY; 
+        const amount = 1; 
 
-        // 4. Generate Strict 14-digit Timestamp (YYYYMMDDHHMMSS)
+        // 4. FIX: Generate Strict 14-digit Timestamp in Africa/Nairobi (UTC+3)
+        // This ensures production (UTC) matches Safaricom (EAT)
         const date = new Date();
+        const nairobiDate = new Date(date.toLocaleString("en-US", { timeZone: "Africa/Nairobi" }));
+        
         const timestamp = 
-            date.getFullYear() +
-            ("0" + (date.getMonth() + 1)).slice(-2) +
-            ("0" + date.getDate()).slice(-2) +
-            ("0" + date.getHours()).slice(-2) +
-            ("0" + date.getMinutes()).slice(-2) +
-            ("0" + date.getSeconds()).slice(-2);
+            nairobiDate.getFullYear().toString() +
+            ("0" + (nairobiDate.getMonth() + 1)).slice(-2) +
+            ("0" + nairobiDate.getDate()).slice(-2) +
+            ("0" + nairobiDate.getHours()).slice(-2) +
+            ("0" + nairobiDate.getMinutes()).slice(-2) +
+            ("0" + nairobiDate.getSeconds()).slice(-2);
 
         // 5. Generate Password (Base64 of ShortCode + Passkey + Timestamp)
         const password = Buffer.from(`${shortCode}${passkey}${timestamp}`).toString('base64');
@@ -182,7 +96,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
             amount,
             status: 'PENDING',
             checkoutID: tempCheckoutID,
-            Transaction_timestamp: new Date()
+            Transaction_timestamp: new Date() // Internal DB can stay UTC
         });
 
         // 7. Initiate STK Push
@@ -191,7 +105,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
             {
                 BusinessShortCode: shortCode,
                 Password: password,
-                Timestamp: timestamp,
+                Timestamp: timestamp, // Now matches the EAT password hash
                 TransactionType: "CustomerPayBillOnline",
                 Amount: amount,
                 PartyA: phone_number,
@@ -213,10 +127,6 @@ router.post('/pay', getAccessToken, async (req, res) => {
         record.checkoutID = stkResponse.data.CheckoutRequestID;
         await record.save();
 
-        // 9. Logging
-        fs.appendFileSync('stk_payloads.txt', JSON.stringify(stkResponse.data) + '\n');
-        console.log("M-Pesa Response:", stkResponse.data);
-
         res.status(200).json({ 
             message: "STK Push initiated", 
             checkoutID: stkResponse.data.CheckoutRequestID 
@@ -224,10 +134,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
 
     } catch (error) {
         const errorData = error.response ? error.response.data : error.message;
-        console.error("Payment Error:", error);
-
-        fs.appendFileSync('errors.txt', JSON.stringify({ error: errorData, timestamp: new Date() }) + '\n');
-
+        console.error("Payment Error:", errorData);
         res.status(error.response ? error.response.status : 500).json({ 
             error: "Payment initiation failed", 
             details: errorData 
