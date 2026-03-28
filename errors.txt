@@ -1,0 +1,11 @@
+{"error":"Request failed with status code 404","timestamp":"2026-03-27T10:03:31.443Z"}
+{"error":"Request failed with status code 404","timestamp":"2026-03-27T10:11:00.557Z"}
+{"error":"Request failed with status code 404","timestamp":"2026-03-27T10:13:36.356Z"}
+{"error":"Request failed with status code 404","timestamp":"2026-03-27T10:14:20.622Z"}
+{"error":"Request failed with status code 404","timestamp":"2026-03-27T10:21:34.448Z"}
+{"error":"Request failed with status code 404","timestamp":"2026-03-27T10:22:29.839Z"}
+{"error":"Request failed with status code 400","timestamp":"2026-03-27T10:26:03.286Z"}
+{"error":"Request failed with status code 400","timestamp":"2026-03-27T10:27:01.375Z"}
+{"error":"Request failed with status code 500","timestamp":"2026-03-27T10:28:55.759Z"}
+{"error":{"requestId":"e0d5-4097-8e5e-73268954f0cf2660","errorCode":"500.001.1001","errorMessage":"Wrong credentials"},"timestamp":"2026-03-27T10:32:42.686Z"}
+{"error":{"requestId":"fbbf-4194-aee9-d242d571922626003","errorCode":"500.001.1001","errorMessage":"Wrong credentials"},"timestamp":"2026-03-27T10:41:56.113Z"}

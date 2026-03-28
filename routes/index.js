@@ -12,53 +12,71 @@ router.get('/', function(req, res, next) {
 });
 
 
+router.get('/status/:checkoutID', async (req, res) => {
+    try {
+        const transaction = await Transaction.findOne({
+            where: { checkoutID: req.params.checkoutID }
+        });
+
+        if (!transaction) {
+            return res.status(404).json({ status: 'NOT_FOUND' });
+        }
+
+        // Return the current status (PENDING, COMPLETED, or FAILED)
+        res.json({ status: transaction.status });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 router.post('/mpesa/callback', async (req, res) => {
+    // Safaricom sends data nested in an array called CallbackMetadata
     const callbackData = req.body.Body.stkCallback;
     const checkoutID = callbackData.CheckoutRequestID;
     const resultCode = callbackData.ResultCode;
-    const MpesaReceiptNumber = callbackData.MpesaReceiptNumber;
-    const transactiondate = callbackData.TransactionDate;
-
 
     if (resultCode === 0) {
-        // 1. Find the record in your DB using checkoutID
-        const transaction = await Transaction.findOne({ where: { checkoutID } });
+        // M-Pesa metadata is an array of objects { Name: '...', Value: '...' }
+        const metadata = callbackData.CallbackMetadata.Item;
+        
+        // Helper to find values in the metadata array
+        const getValue = (name) => metadata.find(item => item.Name === name)?.Value;
 
-        if (!transaction) {
-            console.error("Transaction not found for checkoutID:", checkoutID);
-            return res.status(404).json({ error: "Transaction not found" });
-        }
+        const mpesaReceipt = getValue('MpesaReceiptNumber');
+        const rawDate = getValue('TransactionDate').toString(); // e.g., "20260327134642"
 
-        transaction.status = 'COMPLETED';
-        transaction.transaction_code = MpesaReceiptNumber;
-        transaction.Transaction_timestamp = new Date(transactiondate);
-        await transaction.save();
-
-
-        //create txt file if not exists
-        if (!fs.existsSync('mpesa_callbacks.txt')) {
-            fs.writeFileSync('mpesa_callbacks.txt', '');
-        }
-
-        //save to txt file
-        fs.appendFile('mpesa_callbacks.txt', JSON.stringify(callbackData) + '\n', (err) => {
-            if (err) console.error("Failed to save callback data.");
-        });
-  
+        // Format the date: YYYY-MM-DD HH:mm:ss
+        const formattedDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)} ${rawDate.substring(8, 10)}:${rawDate.substring(10, 12)}:${rawDate.substring(12, 14)}`;
 
         try {
+            const transaction = await Transaction.findOne({ where: { checkoutID } });
+
+            if (!transaction) {
+                console.error("Transaction not found for checkoutID:", checkoutID);
+                return res.status(404).json({ error: "Transaction not found" });
+            }
+
+            // Update record
+            transaction.status = 'COMPLETED';
+            transaction.transaction_code = mpesaReceipt;
+            transaction.Transaction_timestamp = new Date(formattedDate); 
+            await transaction.save();
+
+            console.log(`Transaction ${mpesaReceipt} saved for plate ${transaction.number_plate}`);
+
+            // Trigger the barrier
             await axios.post('https://pacific-api.medicisecure.com/barrier/open', {
                 success: true,
                 plate: transaction.number_plate,
                 action: "paid"
-
             });
-            console.log("Barrier command sent successfully.");
-        } catch (err) {
-            console.error("Failed to signal barrier.");
+            
+        } catch (dbError) {
+            console.error("Database or Barrier Error:", dbError.message);
         }
     } else {
-        console.log(`Transaction failed with code ${resultCode}`);
+        console.log(`Transaction ${checkoutID} failed with code ${resultCode}`);
     }
 
     res.json({ ResultCode: 0, ResultDesc: "Accepted" });
