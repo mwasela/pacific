@@ -4,6 +4,7 @@ const fs = require('fs');
 const axios = require('axios');
 const Transaction = require('../model/Transaction');
 const dotenv = require('dotenv');
+const { console } = require('inspector');
 dotenv.config();
 
 /* GET home page. */
@@ -66,11 +67,14 @@ router.post('/mpesa/callback', async (req, res) => {
             console.log(`Transaction ${mpesaReceipt} saved for plate ${transaction.number_plate}`);
 
             // Trigger the barrier
-            await axios.post('https://pacific-api.medicisecure.com/barrier/open', {
+            await axios.post('https://api.eastafricanparking.com/barrier/open', {
                 success: true,
                 plate: transaction.number_plate,
                 action: "paid"
             });
+
+            console.log(`Barrier open request sent for plate ${transaction.number_plate}`);
+        
             
         } catch (dbError) {
             console.error("Database or Barrier Error:", dbError.message);
@@ -83,6 +87,23 @@ router.post('/mpesa/callback', async (req, res) => {
 });
 
 
+router.post('/barrier/open', async (req, res) => {
+    const { plate } = req.body;
+    
+    try {
+    
+        console.log(`Received barrier open request for plate: ${plate}`);
+
+        // Here you would integrate with the actual barrier hardware API
+        // For demonstration, we just log and return success
+        console.log(`Barrier opened for plate: ${plate}`);
+
+        res.json({ success: true, message: `Barrier opened for plate: ${plate}` });
+    } catch (error) {
+        console.error("Error opening barrier:", error);
+        res.status(500).json({ success: false, message: "Failed to open barrier" });
+    }
+});
 
 
 

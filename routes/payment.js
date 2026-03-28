@@ -197,7 +197,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
                 PartyA: phone_number,
                 PartyB: shortCode, 
                 PhoneNumber: phone_number,
-                CallBackURL: "https://4704-197-248-235-117.ngrok-free.app/mpesa/callback",
+                CallBackURL: "https://api.eastafricanparking.com/mpesa/callback",
                 AccountReference: number_plate.toUpperCase(),
                 TransactionDesc: `Parking fee for ${number_plate}`
             },
