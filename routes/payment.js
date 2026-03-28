@@ -55,7 +55,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
         if (phone_number.startsWith('0')) {
             phone_number = '254' + phone_number.substring(1);
         }
-        
+
         const phoneRegex = /^(2547|2541)\d{8}$/;
         if (!phoneRegex.test(phone_number)) {
             return res.status(400).json({ error: "Invalid Kenyan phone number." });
@@ -69,21 +69,25 @@ router.post('/pay', getAccessToken, async (req, res) => {
 
         // 3. M-Pesa Constants
         const shortCode = process.env.MPESA_SHORTCODE || "174379";
-        const passkey = process.env.MPESA_PASSKEY; 
-        const amount = 1; 
+        const passkey = process.env.MPESA_PASSKEY;
+        const amount = 1;
 
         // 4. FIX: Generate Strict 14-digit Timestamp in Africa/Nairobi (UTC+3)
         // This ensures production (UTC) matches Safaricom (EAT)
-        const date = new Date();
-        const nairobiDate = new Date(date.toLocaleString("en-US", { timeZone: "Africa/Nairobi" }));
-        
-        const timestamp = 
-            nairobiDate.getFullYear().toString() +
-            ("0" + (nairobiDate.getMonth() + 1)).slice(-2) +
-            ("0" + nairobiDate.getDate()).slice(-2) +
-            ("0" + nairobiDate.getHours()).slice(-2) +
-            ("0" + nairobiDate.getMinutes()).slice(-2) +
-            ("0" + nairobiDate.getSeconds()).slice(-2);
+        // 4. GENERATE TIMESTAMP (Forced UTC+3 for Nairobi)
+        const now = new Date();
+        // Add 3 hours (3 * 60 * 60 * 1000 ms) to the current UTC time
+        const nairobiDate = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+
+        const timestamp =
+            nairobiDate.getUTCFullYear().toString() +
+            ("0" + (nairobiDate.getUTCMonth() + 1)).slice(-2) +
+            ("0" + nairobiDate.getUTCDate()).slice(-2) +
+            ("0" + nairobiDate.getUTCHours()).slice(-2) +
+            ("0" + nairobiDate.getUTCMinutes()).slice(-2) +
+            ("0" + nairobiDate.getUTCSeconds()).slice(-2);
+
+        console.log("SENDING TIMESTAMP:", timestamp); // Should show roughly 202603280755xx
 
         // 5. Generate Password (Base64 of ShortCode + Passkey + Timestamp)
         const password = Buffer.from(`${shortCode}${passkey}${timestamp}`).toString('base64');
@@ -96,7 +100,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
             amount,
             status: 'PENDING',
             checkoutID: tempCheckoutID,
-            Transaction_timestamp: new Date() // Internal DB can stay UTC
+            Transaction_timestamp: nairobiDate // Internal DB can stay UTC
         });
 
         // 7. Initiate STK Push
@@ -109,7 +113,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
                 TransactionType: "CustomerPayBillOnline",
                 Amount: amount,
                 PartyA: phone_number,
-                PartyB: shortCode, 
+                PartyB: shortCode,
                 PhoneNumber: phone_number,
                 CallBackURL: "https://api.eastafricanparking.com/mpesa/callback",
                 AccountReference: number_plate.toUpperCase(),
@@ -127,17 +131,17 @@ router.post('/pay', getAccessToken, async (req, res) => {
         record.checkoutID = stkResponse.data.CheckoutRequestID;
         await record.save();
 
-        res.status(200).json({ 
-            message: "STK Push initiated", 
-            checkoutID: stkResponse.data.CheckoutRequestID 
+        res.status(200).json({
+            message: "STK Push initiated",
+            checkoutID: stkResponse.data.CheckoutRequestID
         });
 
     } catch (error) {
         const errorData = error.response ? error.response.data : error.message;
         console.error("Payment Error:", errorData);
-        res.status(error.response ? error.response.status : 500).json({ 
-            error: "Payment initiation failed", 
-            details: errorData 
+        res.status(error.response ? error.response.status : 500).json({
+            error: "Payment initiation failed",
+            details: errorData
         });
     }
 });
