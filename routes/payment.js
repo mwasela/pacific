@@ -8,44 +8,48 @@ dotenv = require('dotenv');
 dotenv.config();
 
 // Middleware to get M-Pesa Access Token
-// const getAccessToken = async (req, res, next) => {
-//     const auth = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64');
-//     try {
-//         const response = await axios.get('https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
-//             headers: { Authorization: `Basic ${auth}` }
-//         });
-//         req.token = response.data.access_token;
-//         next();
-//     } catch (error) {
-//         res.status(500).json({ error: "Failed to authenticate with Safaricom" });
-//     }
-// };
-
 const getAccessToken = async (req, res, next) => {
-    // 1. Ensure your .env contains the Sandbox Consumer Key and Secret
     const auth = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64');
-
     try {
-        // 2. Updated URL from 'api' to 'sandbox'
-        const response = await axios.get('https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
-            headers: {
-                Authorization: `Basic ${auth}`,
-                'Accept': 'application/json'
-            }
+        const response = await axios.get('https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
+            headers: { Authorization: `Basic ${auth}` }
         });
-
         req.token = response.data.access_token;
         next();
     } catch (error) {
-        // 3. Log the specific error for easier debugging in your terminal
-        console.error("M-Pesa Auth Error:", error.response ? error.response.data : error.message);
-
-        res.status(500).json({
-            error: "Failed to authenticate with Safaricom",
-            details: error.response ? error.response.data.errorMessage : "Network Error"
-        });
+        res.status(500).json({ error: "Failed to authenticate with Safaricom" });
     }
 };
+
+
+
+// const getAccessToken = async (req, res, next) => {
+//     // 1. Ensure your .env contains the Sandbox Consumer Key and Secret
+//     const auth = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64');
+
+//     try {
+//         // 2. Updated URL from 'api' to 'sandbox'
+//         const response = await axios.get('https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
+//             headers: {
+//                 Authorization: `Basic ${auth}`,
+//                 'Accept': 'application/json'
+//             }
+//         });
+
+//         req.token = response.data.access_token;
+//         next();
+//     } catch (error) {
+//         // 3. Log the specific error for easier debugging in your terminal
+//         console.error("M-Pesa Auth Error:", error.response ? error.response.data : error.message);
+
+//         res.status(500).json({
+//             error: "Failed to authenticate with Safaricom",
+//             details: error.response ? error.response.data.errorMessage : "Network Error"
+//         });
+//     }
+// };
+
+
 // POST: /payment/pay
 router.post('/pay', getAccessToken, async (req, res) => {
     try {
@@ -105,7 +109,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
 
         // 7. Initiate STK Push
         const stkResponse = await axios.post(
-            'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+            'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
             {
                 BusinessShortCode: shortCode,
                 Password: password,

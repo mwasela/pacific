@@ -88,10 +88,13 @@ router.post('/mpesa/callback', async (req, res) => {
 
 
 router.post('/barrier/open', async (req, res) => {
-    const { plate } = req.body;
+    const { plate, success } = req.body;
     
     try {
-    
+        if (!success) {
+            return res.status(400).json({ success: false, message: "Payment not successful, barrier will not open" });
+        }
+        
         console.log(`Received barrier open request for plate: ${plate}`);
 
         // Here you would integrate with the actual barrier hardware API
