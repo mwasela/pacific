@@ -26,6 +26,10 @@ app.use('/', indexRouter);
 app.use('/users', usersRouter);
 app.use('/payment', paymentRouter);
 
+if (typeof paymentRouter.startPendingChargesCron === 'function') {
+  paymentRouter.startPendingChargesCron();
+}
+
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
   next(createError(404));

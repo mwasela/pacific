@@ -3,9 +3,115 @@ const axios = require('axios');
 const router = express.Router();
 const Transaction = require('../model/Transaction');
 const fs = require('fs');
+const Visits = require('../model/Visits');
 const { Console } = require('console');
 dotenv = require('dotenv');
 dotenv.config();
+
+
+callback_url = "https://b9c5-102-209-18-114.ngrok-free.app/mpesa/callback";
+prod_callback_url = "https://api.eastafricanparking.com/mpesa/callback";
+
+const CHARGE_CRON_INTERVAL_MS = 60 * 1000;
+let pendingChargesCronHandle = null;
+
+const calculateChargeFromVisitTime = (visitTimestamp, now = new Date()) => {
+    const visitTime = new Date(visitTimestamp);
+
+    // Backward compatibility: older entries were stored as now+3h.
+    let effectiveVisitTime = visitTime;
+    let elapsedTime = now.getTime() - effectiveVisitTime.getTime();
+    if (elapsedTime < 0) {
+        const legacyVisitTime = new Date(visitTime.getTime() - (3 * 60 * 60 * 1000));
+        const legacyElapsed = now.getTime() - legacyVisitTime.getTime();
+        if (legacyElapsed >= 0) {
+            effectiveVisitTime = legacyVisitTime;
+            elapsedTime = legacyElapsed;
+        }
+    }
+
+    const elapsedMinutes = Math.max(0, Math.ceil(elapsedTime / (1000 * 60)));
+    const elapsedHours = Math.max(0, Math.ceil(elapsedMinutes / 60));
+
+    const nowNairobiDate = now.toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+    const visitNairobiDate = effectiveVisitTime.toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+    const isOvernight = elapsedTime > 0 && nowNairobiDate !== visitNairobiDate;
+
+    let amount;
+    if (isOvernight) {
+        amount = 1000;
+    } else if (elapsedMinutes <= 15) {
+        amount = 0;
+    } else if (elapsedMinutes <= 60) {
+        amount = 50;
+    } else if (elapsedMinutes <= 180) {
+        amount = 100;
+    } else {
+        const extraHours = Math.ceil((elapsedMinutes - 180) / 60);
+        amount = 100 + (extraHours * 50);
+        amount = Math.min(amount, 600);
+    }
+
+    return {
+        amount,
+        elapsedHours
+    };
+};
+
+const recalculatePendingVisitsCharges = async () => {
+    try {
+        const pendingVisits = await Visits.findAll({
+            where: { status: '1' },
+            order: [['visit_timestamp', 'DESC']]
+        });
+
+        for (const visit of pendingVisits) {
+            const transaction = await Transaction.findOne({
+                where: { visit_id: visit.id },
+                order: [['createdAt', 'DESC']]
+            });
+
+            if (!transaction || transaction.status === 'COMPLETED') {
+                continue;
+            }
+
+            const { amount, elapsedHours } = calculateChargeFromVisitTime(visit.visit_timestamp);
+            const normalizedHours = elapsedHours < 1 ? 1 : elapsedHours;
+
+            let visitChanged = false;
+            if (visit.amount !== amount) {
+                visit.amount = amount;
+                visitChanged = true;
+            }
+            if (visit.hours !== normalizedHours) {
+                visit.hours = normalizedHours;
+                visitChanged = true;
+            }
+
+            if (visitChanged) {
+                await visit.save();
+            }
+
+            if (transaction.amount !== amount) {
+                transaction.amount = amount;
+                await transaction.save();
+            }
+        }
+    } catch (error) {
+        console.error('Pending visits charge cron failed:', error.message);
+    }
+};
+
+const startPendingChargesCron = () => {
+    if (pendingChargesCronHandle) {
+        return;
+    }
+
+    // Run once immediately, then every 60 seconds.
+    recalculatePendingVisitsCharges();
+    pendingChargesCronHandle = setInterval(recalculatePendingVisitsCharges, CHARGE_CRON_INTERVAL_MS);
+    console.log('Pending visits charge cron started (60s interval).');
+};
 
 // Middleware to get M-Pesa Access Token
 const getAccessToken = async (req, res, next) => {
@@ -20,6 +126,76 @@ const getAccessToken = async (req, res, next) => {
         res.status(500).json({ error: "Failed to authenticate with Safaricom" });
     }
 };
+
+
+router.get('/charges', async (req, res) => {
+
+        let number_plate = req.query.number_plate;
+        let phone_number = req.query.phone_number;
+
+        try {
+
+        // 1. Sanitize & Validate Phone Number
+        if (phone_number.startsWith('0')) {
+            phone_number = '254' + phone_number.substring(1);
+        }
+
+        const phoneRegex = /^(2547|2541)\d{8}$/;
+        if (!phoneRegex.test(phone_number)) {
+            return res.status(400).json({ error: "Invalid Kenyan phone number." });
+        }
+
+        // 2. Validate Number Plate
+        const plateRegex = /^[A-Z0-9]{1,8}$/i;
+        if (!plateRegex.test(number_plate)) {
+            return res.status(400).json({ error: "Invalid number plate." });
+        }
+
+        //check lates visit for this plate
+        const visit = await Visits.findOne({
+            where: { vehicle_number: number_plate.toUpperCase(), status: '1' },
+            order: [['visit_timestamp', 'DESC']]
+        });
+
+            if (!visit) {
+                return res.status(404).json({ error: "No active visit found for this number plate." });
+            }
+        
+        //pull associated transaction and updat phone number
+        const transaction = await Transaction.findOne({
+            where: { visit_id: visit.id },
+            order: [['createdAt', 'DESC']]
+        });
+
+        if (!transaction) {
+            return res.status(404).json({ error: "No transaction found for this number plate." });
+        }
+
+        const { amount, elapsedHours } = calculateChargeFromVisitTime(visit.visit_timestamp);
+
+        transaction.phone_number = phone_number;
+        transaction.amount = amount;
+        await transaction.save();
+
+        //update visit record with calculated amount and hours
+        visit.hours = elapsedHours < 1 ? 1 : elapsedHours;
+        visit.amount = amount;
+        await visit.save();
+
+        res.json({
+            number_plate: visit.vehicle_number,
+            visit_timestamp: visit.visit_timestamp,
+            elapsed_hours: elapsedHours,
+            amount_due: amount,
+            visit_id: visit.id
+        });
+    
+    } catch (error) {
+        console.error("Error fetching charges:", error);
+        res.status(500).json({ error: "Failed to fetch charges" });
+    }
+});
+    
 
 
 
@@ -53,32 +229,43 @@ const getAccessToken = async (req, res, next) => {
 // POST: /payment/pay
 router.post('/pay', getAccessToken, async (req, res) => {
     try {
-        let { number_plate, phone_number } = req.body;
+        let { visit_id } = req.body;
 
-        // 1. Sanitize & Validate Phone Number
-        if (phone_number.startsWith('0')) {
-            phone_number = '254' + phone_number.substring(1);
+        if (!visit_id) {
+            return res.status(400).json({ error: "visit_id is required" });
         }
 
-        const phoneRegex = /^(2547|2541)\d{8}$/;
-        if (!phoneRegex.test(phone_number)) {
-            return res.status(400).json({ error: "Invalid Kenyan phone number." });
+        //find transaction record for this visit
+        const transaction = await Transaction.findOne({
+            where: { visit_id: visit_id }
+        });
+
+        if (!transaction) {
+            return res.status(404).json({ error: "No transaction found for this visit ID." });
         }
 
-        // 2. Validate Number Plate
-        const plateRegex = /^[A-Z0-9]{1,8}$/i;
-        if (!plateRegex.test(number_plate)) {
-            return res.status(400).json({ error: "Invalid number plate." });
+
+        const phone_number = transaction.phone_number;
+        const number_plate = transaction.number_plate;
+        const amount = transaction.amount;
+
+        if (!phone_number) {
+            return res.status(400).json({ error: "Phone number missing. Call /payment/charges first." });
         }
 
-        // 3. M-Pesa Constants
-        const shortCode = process.env.MPESA_SHORTCODE || "174379";
+        
+        // // 3. M-Pesa Constants
+        const shortCode = process.env.MPESA_SHORTCODE;
         const passkey = process.env.MPESA_PASSKEY;
-        const amount = 1;
 
-        // 4. FIX: Generate Strict 14-digit Timestamp in Africa/Nairobi (UTC+3)
-        // This ensures production (UTC) matches Safaricom (EAT)
-        // 4. GENERATE TIMESTAMP (Forced UTC+3 for Nairobi)
+
+        //if either shortcode or passkey is missing, return error
+        if (!shortCode || !passkey) {
+            console.error("M-Pesa Configuration Error: Missing Shortcode or Passkey");
+            return res.status(500).json({ error: "Payment configuration error. Please contact support." });
+        }
+
+        // // 4. GENERATE TIMESTAMP (Forced UTC+3 for Nairobi)
         const now = new Date();
         // Add 3 hours (3 * 60 * 60 * 1000 ms) to the current UTC time
         const nairobiDate = new Date(now.getTime() + (3 * 60 * 60 * 1000));
@@ -91,21 +278,10 @@ router.post('/pay', getAccessToken, async (req, res) => {
             ("0" + nairobiDate.getUTCMinutes()).slice(-2) +
             ("0" + nairobiDate.getUTCSeconds()).slice(-2);
 
-        console.log("SENDING TIMESTAMP:", timestamp); // Should show roughly 202603280755xx
+        // console.log("SENDING TIMESTAMP:", timestamp); // Should show roughly 202603280755xx
 
-        // 5. Generate Password (Base64 of ShortCode + Passkey + Timestamp)
+        // // 5. Generate Password (Base64 of ShortCode + Passkey + Timestamp)
         const password = Buffer.from(`${shortCode}${passkey}${timestamp}`).toString('base64');
-
-        // 6. Create local pending transaction record
-        const tempCheckoutID = `TEMP_${phone_number}_${timestamp}`;
-        const record = await Transaction.create({
-            number_plate: number_plate.toUpperCase(),
-            phone_number,
-            amount,
-            status: 'PENDING',
-            checkoutID: tempCheckoutID,
-            Transaction_timestamp: nairobiDate // Internal DB can stay UTC
-        });
 
         // 7. Initiate STK Push
         const stkResponse = await axios.post(
@@ -119,7 +295,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
                 PartyA: phone_number,
                 PartyB: shortCode,
                 PhoneNumber: phone_number,
-                CallBackURL: "https://api.eastafricanparking.com/mpesa/callback",
+                CallBackURL: prod_callback_url,
                 AccountReference: number_plate.toUpperCase(),
                 TransactionDesc: `Parking fee for ${number_plate}`
             },
@@ -131,9 +307,10 @@ router.post('/pay', getAccessToken, async (req, res) => {
             }
         );
 
-        // 8. Update record with actual Safaricom CheckoutRequestID
-        record.checkoutID = stkResponse.data.CheckoutRequestID;
-        await record.save();
+        // 8. Update record with actual Safaricom CheckoutRequestID and tranasaction time
+        transaction.checkoutID = stkResponse.data.CheckoutRequestID;
+        transaction.Transaction_timestamp = nairobiDate; // Use the same timestamp as the password generation time
+        await transaction.save();
 
         res.status(200).json({
             message: "STK Push initiated",
@@ -151,3 +328,4 @@ router.post('/pay', getAccessToken, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.startPendingChargesCron = startPendingChargesCron;

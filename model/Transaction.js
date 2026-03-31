@@ -1,5 +1,6 @@
 const sequelize = require('../config/database');
 const { DataTypes } = require('sequelize');
+const Visits = require('./Visits');
 
 
 const Transaction = sequelize.define('Transaction', {
@@ -8,18 +9,22 @@ const Transaction = sequelize.define('Transaction', {
         allowNull: true,
         unique: true
     },
+    visit_id: {
+        type: DataTypes.INTEGER,
+        allowNull: false
+    },
     number_plate: {
-        type: DataTypes.STRING,
+        type: DataTypes.STRING(30),
         allowNull: false
     },
     phone_number: {
-        type: DataTypes.STRING,
-        allowNull: false
+        type: DataTypes.STRING(15),
+        allowNull: true
     },
     amount: {
         type: DataTypes.FLOAT,
         allowNull: false,
-        defaultValue: 1.0
+        defaultValue: 0
     },
     status: {
         type: DataTypes.STRING,
@@ -34,10 +39,17 @@ const Transaction = sequelize.define('Transaction', {
     Transaction_timestamp: {
         type: DataTypes.DATE,
         allowNull: false
+    },
+    payment_timestamp: {
+        type: DataTypes.DATE,
+        allowNull: true // Will be set when payment is confirmed
     }
 }, {
     timestamps: true
 });
+
+//A transaction belongs to a visit
+Transaction.belongsTo(Visits, { foreignKey: 'visit_id' });
 
 
 sequelize.sync({

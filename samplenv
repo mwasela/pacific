@@ -6,7 +6,7 @@ TOKEN=gVVtPAMUhWU5tw+Ncrz59zzEtPvnE7+GyUQTjTlenyZEstMhiI9hkbgPhKPMu/AeTRC2aSwyNF
 
 
 DB_NAME=pacific_db
-DB_USER=pacific
-DB_PASSWORD=H3K4alphaPACIFIC
+DB_USER=michael
+DB_PASSWORD=12345
 DB_HOST=localhost
 PORT=9152
