@@ -135,14 +135,20 @@ router.get('/charges', async (req, res) => {
 
         try {
 
-        // 1. Sanitize & Validate Phone Number
-        if (phone_number.startsWith('0')) {
-            phone_number = '254' + phone_number.substring(1);
+        if (!ticket_id) {
+            return res.status(400).json({ error: "ticket_id is required." });
         }
 
-        const phoneRegex = /^(2547|2541)\d{8}$/;
-        if (!phoneRegex.test(phone_number)) {
-            return res.status(400).json({ error: "Invalid Kenyan phone number." });
+        // 1. Sanitize & Validate Phone Number
+        if (phone_number) {
+            if (phone_number.startsWith('0')) {
+                phone_number = '254' + phone_number.substring(1);
+            }
+
+            const phoneRegex = /^(2547|2541)\d{8}$/;
+            if (!phoneRegex.test(phone_number)) {
+                return res.status(400).json({ error: "Invalid Kenyan phone number." });
+            }
         }
 
         //check lates visit for this plate
@@ -167,7 +173,9 @@ router.get('/charges', async (req, res) => {
 
         const { amount, elapsedHours } = calculateChargeFromVisitTime(visit.visit_timestamp);
 
-        transaction.phone_number = phone_number;
+        if (phone_number) {
+            transaction.phone_number = phone_number;
+        }
         transaction.amount = amount;
         await transaction.save();
 
