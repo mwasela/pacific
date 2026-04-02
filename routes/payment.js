@@ -130,10 +130,10 @@ const getAccessToken = async (req, res, next) => {
 
 router.get('/charges', async (req, res) => {
 
-        let ticket_id = req.query.ticket_id
-        // let phone_number = req.query.phone_number;
+    let ticket_id = req.query.ticket_id
+    // let phone_number = req.query.phone_number;
 
-        try {
+    try {
 
         if (!ticket_id) {
             return res.status(400).json({ error: "ticket_id is required." });
@@ -157,10 +157,10 @@ router.get('/charges', async (req, res) => {
             order: [['visit_timestamp', 'DESC']]
         });
 
-            if (!visit) {
-                return res.status(404).json({ error: "No active visit found for this ticket ID." });
-            }
-        
+        if (!visit) {
+            return res.status(404).json({ error: "No active visit found for this ticket ID." });
+        }
+
         //pull associated transaction and updat phone number
         const transaction = await Transaction.findOne({
             where: { visit_id: visit.id },
@@ -191,13 +191,13 @@ router.get('/charges', async (req, res) => {
             amount_due: amount,
             visit_id: visit.id
         });
-    
+
     } catch (error) {
         console.error("Error fetching charges:", error);
         res.status(500).json({ error: "Failed to fetch charges" });
     }
 });
-    
+
 
 
 
@@ -231,11 +231,11 @@ router.get('/charges', async (req, res) => {
 // POST: /payment/pay
 router.post('/pay', getAccessToken, async (req, res) => {
     try {
-        let { ticket_id, phone_no} = req.body;
+        let { ticket_id, phone_no } = req.body;
 
         let phone_number = phone_no;
 
-                // 1. Sanitize & Validate Phone Number
+        // 1. Sanitize & Validate Phone Number
         if (phone_number) {
             if (phone_number.startsWith('0')) {
                 phone_number = '254' + phone_number.substring(1);
@@ -246,7 +246,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
                 return res.status(400).json({ error: "Invalid Kenyan phone number." });
             }
         }
-        
+
         if (!ticket_id) {
             return res.status(400).json({ error: "ticket_id is required" });
         }
@@ -277,7 +277,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
             return res.status(400).json({ error: "Phone number missing. Call /payment/charges first." });
         }
 
-        
+
         // // 3. M-Pesa Constants
         const shortCode = process.env.MPESA_SHORTCODE;
         const passkey = process.env.MPESA_PASSKEY;
@@ -350,6 +350,59 @@ router.post('/pay', getAccessToken, async (req, res) => {
         });
     }
 });
+
+//status called by user when supplying ticket_id to check if payment was successful
+router.get('/status', async (req, res) => {
+    try {
+        const ticket_id = req.query.ticket_id;
+
+        // 1. Validate that ticket_id was actually provided
+        if (!ticket_id) {
+            return res.status(400).json({ error: "Ticket ID is required." });
+        }
+
+        // 2. Find the most recent visit for this ticket
+        const curentVisit = await Visits.findOne({
+            where: { ticket_id: ticket_id },
+            order: [['visit_timestamp', 'DESC']]
+        });
+
+        if (!curentVisit) {
+            return res.status(404).json({ error: "No visit found for this ticket ID." });
+        }
+
+        // 3. Find the most recent transaction linked to that visit
+        const transaction = await Transaction.findOne({
+            where: { visit_id: curentVisit.id },
+            order: [['createdAt', 'DESC']]
+        });
+
+        if (!transaction) {
+            return res.status(404).json({ 
+                error: "No transaction found for this visit.",
+                visit_id: curentVisit.id 
+            });
+        }
+
+        // 4. Return the consolidated status
+        return res.json({
+            ticket_id: ticket_id,
+            paid_status: transaction.status, // Should return 'PENDING', 'COMPLETED', or 'FAILED'
+            amount: curentVisit.amount,
+            transaction_code: transaction.transaction_code || null, // Using the M-Pesa Receipt Number
+            checkoutID: transaction.checkoutID,
+            updatedAt: transaction.updatedAt
+        });
+
+    } catch (error) {
+        console.error("Error fetching payment status:", error);
+        return res.status(500).json({ 
+            error: "Internal server error while checking status.",
+            details: error.message 
+        });
+    }
+});
+
 
 module.exports = router;
 module.exports.startPendingChargesCron = startPendingChargesCron;
