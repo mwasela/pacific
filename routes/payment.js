@@ -131,7 +131,7 @@ const getAccessToken = async (req, res, next) => {
 router.get('/charges', async (req, res) => {
 
         let ticket_id = req.query.ticket_id
-        let phone_number = req.query.phone_number;
+        // let phone_number = req.query.phone_number;
 
         try {
 
@@ -231,23 +231,45 @@ router.get('/charges', async (req, res) => {
 // POST: /payment/pay
 router.post('/pay', getAccessToken, async (req, res) => {
     try {
-        let { visit_id } = req.body;
+        let { ticket_id, phone_no} = req.body;
 
-        if (!visit_id) {
-            return res.status(400).json({ error: "visit_id is required" });
+        let phone_number = phone_no;
+
+                // 1. Sanitize & Validate Phone Number
+        if (phone_number) {
+            if (phone_number.startsWith('0')) {
+                phone_number = '254' + phone_number.substring(1);
+            }
+
+            const phoneRegex = /^(2547|2541)\d{8}$/;
+            if (!phoneRegex.test(phone_number)) {
+                return res.status(400).json({ error: "Invalid Kenyan phone number." });
+            }
+        }
+        
+        if (!ticket_id) {
+            return res.status(400).json({ error: "ticket_id is required" });
+        }
+
+        const visit = await Visits.findOne({
+            where: { ticket_id: ticket_id, status: '1' },
+            order: [['visit_timestamp', 'DESC']]
+        });
+
+        if (!visit) {
+            return res.status(404).json({ error: "No active visit found for this ticket ID." });
         }
 
         //find transaction record for this visit
         const transaction = await Transaction.findOne({
-            where: { visit_id: visit_id }
+            where: { visit_id: visit.id },
+            order: [['createdAt', 'DESC']]
         });
 
         if (!transaction) {
             return res.status(404).json({ error: "No transaction found for this visit ID." });
         }
 
-
-        const phone_number = transaction.phone_number;
         const number_plate = transaction.number_plate;
         const amount = transaction.amount;
 
@@ -298,7 +320,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
                 PartyB: shortCode,
                 PhoneNumber: phone_number,
                 CallBackURL: prod_callback_url,
-                AccountReference: number_plate.toUpperCase(),
+                AccountReference: (number_plate || ticket_id).toUpperCase(),
                 TransactionDesc: `Parking fee for ${number_plate}`
             },
             {
