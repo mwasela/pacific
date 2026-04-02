@@ -235,16 +235,23 @@ router.post('/pay', getAccessToken, async (req, res) => {
 
         let phone_number = phone_no;
 
-        // 1. Sanitize & Validate Phone Number
-        if (phone_number) {
-            if (phone_number.startsWith('0')) {
-                phone_number = '254' + phone_number.substring(1);
-            }
+        if (!phone_number) {
+            return res.status(400).json({ error: "phone_no is required" });
+        }
 
-            const phoneRegex = /^(2547|2541)\d{8}$/;
-            if (!phoneRegex.test(phone_number)) {
-                return res.status(400).json({ error: "Invalid Kenyan phone number." });
-            }
+        phone_number = String(phone_number).trim();
+
+        // 1. Sanitize & Validate Phone Number
+        if (phone_number.startsWith('+254')) {
+            phone_number = phone_number.substring(1);
+        }
+        if (phone_number.startsWith('0')) {
+            phone_number = '254' + phone_number.substring(1);
+        }
+
+        const phoneRegex = /^(2547|2541)\d{8}$/;
+        if (!phoneRegex.test(phone_number)) {
+            return res.status(400).json({ error: "Invalid Kenyan phone number." });
         }
 
         if (!ticket_id) {
@@ -270,12 +277,11 @@ router.post('/pay', getAccessToken, async (req, res) => {
             return res.status(404).json({ error: "No transaction found for this visit ID." });
         }
 
+        transaction.phone_number = phone_number;
+        await transaction.save();
+
         const number_plate = transaction.number_plate;
         const amount = transaction.amount;
-
-        if (!phone_number) {
-            return res.status(400).json({ error: "Phone number missing. Call /payment/charges first." });
-        }
 
 
         // // 3. M-Pesa Constants

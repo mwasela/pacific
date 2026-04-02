@@ -129,6 +129,85 @@
             margin-bottom: 0;
         }
 
+        .meta-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 8px 0;
+            font-size: 0.95rem;
+            opacity: 0.92;
+        }
+
+        .meta-key {
+            opacity: 0.75;
+            text-align: left;
+        }
+
+        .meta-value {
+            text-align: right;
+            word-break: break-word;
+        }
+
+        .result-card {
+            margin-top: 14px;
+            padding: 14px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            text-align: left;
+        }
+
+        .table-wrap {
+            margin-top: 12px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th,
+        td {
+            padding: 10px 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+            text-align: left;
+        }
+
+        th {
+            background: rgba(0, 212, 255, 0.16);
+            font-weight: 600;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .loading-inline {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .loader-inline {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(15, 32, 39, 0.2);
+            border-top: 2px solid #0f2027;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .error-text {
+            color: #ff9c9c;
+            margin-top: 12px;
+            font-size: 0.95rem;
+            min-height: 24px;
+        }
+
         footer {
             margin-top: 24px;
             opacity: 0.75;
@@ -220,29 +299,105 @@
     <div class="container">
         <input type="text" id="website_hp" style="display:none !important" tabindex="-1" autocomplete="off">
         <div id="step1" class="step active">
-            <h1>Welcome to <span class="highlight">Pacific</span></h1>
-            <p>Enter your number plate and phone number to retrieve charges and pay.</p>
-            <input type="text" id="plateNumber" placeholder="Vehicle Plate Number (e.g. KAA 001A)">
-            <input type="tel" id="phoneNumber" placeholder="M-Pesa Phone Number (07...)">
-            <button id="submitButton" onclick="submitDetails()">Check Charges & Pay</button>
-        </div>
+            <h1>Parking <span class="highlight">Payment</span></h1>
+            <p id="introText">Ticket charges are loaded from the URL. Enter phone number and click pay.</p>
 
-        <div id="step2" class="step">
-            <div class="loader"></div>
-            <h2 id="statusTitle">Checking Charges</h2>
-            <div class="amount-card">
-                <div class="amount-label">Amount Due</div>
-                <div class="amount-value" id="amountDue">KES 0</div>
+            <div id="landingInfo" class="result-card" style="display: none;">
+                <h2 style="margin-bottom: 8px; font-size: 1.25rem; color: #00d4ff;">East African Parking Company System</h2>
+                <p style="margin-bottom: 8px;">Use your issued ticket and scan QR to view and pay parking charges via M-Pesa.</p>
+            
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Parking Duration</th>
+                                <th>Amount (KES)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>0 - 15 minutes</td>
+                                <td>0</td>
+                            </tr>
+                            <tr>
+                                <td>16 - 60 minutes</td>
+                                <td>50</td>
+                            </tr>
+                            <tr>
+                                <td>61 - 180 minutes</td>
+                                <td>100</td>
+                            </tr>
+                            <tr>
+                                <td>Above 180 minutes</td>
+                                <td>100 + 50/hour (max 600)</td>
+                            </tr>
+                            <tr>
+                                <td>Overnight</td>
+                                <td>1000</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <p class="status-copy" id="statusMessage">Retrieving your active visit and current parking charges.</p>
-        </div>
 
-        <div id="step3" class="step">
-            <h1 style="color: #28a745;">Payment Successful</h1>
-            <p id="successMessage">Payment confirmed. Wait for the barrier to open.</p>
-            <div class="badge"
-                style="border-color: #28a745; color: #28a745; padding: 10px 20px; border: 2px solid; border-radius: 30px;">
-                Access Granted</div>
+            <div id="loadingCard" class="result-card" style="display: none; text-align: center;">
+                <div class="loader"></div>
+                <p id="loadingText" style="margin-bottom: 0;">Loading...</p>
+            </div>
+
+            <div id="paymentFlow">
+                <div class="amount-card">
+                    <div class="amount-label">Amount Due</div>
+                    <div class="amount-value" id="amountDue">KES --</div>
+                </div>
+
+                <div class="result-card" id="ticketDetails">
+                    <div class="meta-row">
+                        <span class="meta-key">Ticket ID</span>
+                        <span class="meta-value" id="ticketIdText">--</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-key">Visit Time</span>
+                        <span class="meta-value" id="visitTimeText">--</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-key">Elapsed Hours</span>
+                        <span class="meta-value" id="elapsedHoursText">--</span>
+                    </div>
+                </div>
+
+                <input type="tel" id="phoneNumber" placeholder="M-Pesa Phone Number (07...)">
+                <button id="payButton" data-default-text="Pay" onclick="initiatePayment()">Pay</button>
+                <button id="checkStatusButton" data-default-text="Check Status" onclick="checkStatus()" style="margin-top: 10px; display: none;">Check Status</button>
+
+                <div class="result-card" id="paymentResponseCard" style="display: none; margin-top: 12px;">
+                    <div class="meta-row">
+                        <span class="meta-key">Message</span>
+                        <span class="meta-value" id="payMessage">--</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-key">Checkout ID</span>
+                        <span class="meta-value" id="checkoutIdText">--</span>
+                    </div>
+                </div>
+
+                <div class="result-card" id="statusCard" style="display: none; margin-top: 12px;">
+                    <div class="meta-row">
+                        <span class="meta-key">Payment Status</span>
+                        <span class="meta-value" id="paidStatusText">--</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-key">Amount</span>
+                        <span class="meta-value" id="statusAmountText">--</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-key">Trans Code</span>
+                        <span class="meta-value" id="transCodeText">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <p class="error-text" id="errorText"></p>
         </div>
 
         <footer>
@@ -253,133 +408,191 @@
     <div id="toast">Barrier Opening... Drive Safe!</div>
 
     <script>
-        const API_BASE = 'https://test.eastafricanparking.com'
-        const POLL_INTERVAL_MS = 3000;
-        const POLL_TIMEOUT_MS = 120000;
+        const API_BASE = window.location.origin || 'https://payments.eastafricanparking.com';
+        let activeTicketId = null;
 
-        async function submitDetails() {
-            const botField = document.getElementById('website_hp').value;
-            if (botField) {
-                console.warn("Bot detected.");
+        function getTicketIdFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('ticket_id');
+        }
+
+        function setError(message) {
+            document.getElementById('errorText').textContent = message || '';
+        }
+
+        function setLoading(loading, message) {
+            const loadingCard = document.getElementById('loadingCard');
+            const loadingText = document.getElementById('loadingText');
+            loadingCard.style.display = loading ? 'block' : 'none';
+            if (message) {
+                loadingText.textContent = message;
+            }
+        }
+
+        function setButtonLoading(buttonId, loading, loadingLabel) {
+            const button = document.getElementById(buttonId);
+            const defaultText = button.getAttribute('data-default-text') || button.textContent;
+
+            if (!button.getAttribute('data-default-text')) {
+                button.setAttribute('data-default-text', defaultText);
+            }
+
+            button.disabled = loading;
+            if (loading) {
+                button.innerHTML = `<span class="loading-inline"><span class="loader-inline"></span>${loadingLabel}</span>`;
+            } else {
+                button.textContent = button.getAttribute('data-default-text');
+            }
+        }
+
+        function showLandingMode() {
+            document.getElementById('introText').textContent = 'Welcome to East African Parking Company System.';
+            document.getElementById('landingInfo').style.display = 'block';
+            document.getElementById('paymentFlow').style.display = 'none';
+        }
+
+        function showPaymentMode() {
+            document.getElementById('introText').textContent = 'Ticket charges are loaded from the URL. Enter phone number and click pay.';
+            document.getElementById('landingInfo').style.display = 'none';
+            document.getElementById('paymentFlow').style.display = 'block';
+        }
+
+        function normalizePhone(phone) {
+            let normalized = String(phone || '').trim();
+            if (normalized.startsWith('+254')) {
+                normalized = normalized.substring(1);
+            }
+            if (normalized.startsWith('0')) {
+                normalized = `254${normalized.substring(1)}`;
+            }
+            return normalized;
+        }
+
+        function isValidPhone(phone) {
+            return /^(2547|2541)\d{8}$/.test(phone);
+        }
+
+        async function loadCharges() {
+            setError('');
+            const ticketId = getTicketIdFromUrl();
+            activeTicketId = ticketId;
+
+            if (!ticketId) {
+                showLandingMode();
                 return;
             }
 
-            const plate = document.getElementById('plateNumber').value.trim().toUpperCase();
-            const phone = document.getElementById('phoneNumber').value.trim();
-            const submitButton = document.getElementById('submitButton');
-
-            if (!plate || !phone) {
-                alert("Please fill in all fields.");
-                return;
-            }
-
-            const phoneRegex = /^(?:254|\+254|0)?(7|1)(?:[0-9]){8}$/;
-            if (!phoneRegex.test(phone)) {
-                alert("Please enter a valid M-Pesa number (e.g., 0712345678).");
-                return;
-            }
-
-            submitButton.disabled = true;
-            showStep(2);
-            setProcessingState('Checking Charges', 'Retrieving your active visit and current parking charges.', 'KES --');
+            showPaymentMode();
+            document.getElementById('ticketIdText').textContent = ticketId;
+            setLoading(true, 'Loading ticket charges...');
 
             try {
-                const chargeResponse = await fetch(`${API_BASE}/payment/charges?number_plate=${encodeURIComponent(plate)}&phone_number=${encodeURIComponent(phone)}`);
-                const chargeData = await chargeResponse.json();
+                const response = await fetch(`${API_BASE}/payment/charges?ticket_id=${encodeURIComponent(ticketId)}`);
+                const data = await response.json();
 
-                if (!chargeResponse.ok) {
-                    throw new Error(chargeData.error || 'Failed to retrieve charges.');
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to fetch charges.');
                 }
 
-                const amountDue = Number(chargeData.amount_due || 0);
-                const visitId = chargeData.visit_id;
+                document.getElementById('amountDue').textContent = `KES ${Number(data.amount_due || 0)}`;
+                document.getElementById('visitTimeText').textContent = data.visit_timestamp || '--';
+                document.getElementById('elapsedHoursText').textContent = data.elapsed_hours ?? '--';
+            } catch (error) {
+                console.error('Error loading charges:', error);
+                setError(error.message || 'Failed to fetch charges.');
+                document.getElementById('payButton').disabled = true;
+            } finally {
+                setLoading(false);
+            }
+        }
 
-                setProcessingState(
-                    'Charge Retrieved',
-                    amountDue === 0
-                        ? 'No payment is required for this visit. You can proceed.'
-                        : 'Charge retrieved successfully. Sending M-Pesa prompt to your phone now.',
-                    `KES ${amountDue}`
-                );
+        async function initiatePayment() {
+            setError('');
 
-                if (!visitId) {
-                    throw new Error('Visit ID missing from charges response.');
-                }
+            const botField = document.getElementById('website_hp').value;
+            if (botField) {
+                console.warn('Bot detected.');
+                return;
+            }
 
-                if (amountDue === 0) {
-                    showSuccess('No payment is required for this visit. You may proceed to the barrier.');
-                    return;
-                }
+            if (!activeTicketId) {
+                setError('Missing ticket_id in URL.');
+                return;
+            }
 
-                setProcessingState('Processing Payment', 'Please enter your M-Pesa PIN on the prompt sent to your phone.', `KES ${amountDue}`);
+            const checkStatusButton = document.getElementById('checkStatusButton');
+            const rawPhone = document.getElementById('phoneNumber').value;
+            const phoneNo = normalizePhone(rawPhone);
 
-                const payResponse = await fetch(`${API_BASE}/payment/pay`, {
+            if (!isValidPhone(phoneNo)) {
+                setError('Please enter a valid M-Pesa number (e.g. 0758337870).');
+                return;
+            }
+
+            setButtonLoading('payButton', true, 'Processing...');
+
+            try {
+                const response = await fetch(`${API_BASE}/payment/pay`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Requested-With': 'XMLHttpRequest'
                     },
                     body: JSON.stringify({
-                        visit_id: visitId
+                        ticket_id: activeTicketId,
+                        phone_no: rawPhone
                     })
                 });
-                const payData = await payResponse.json();
 
-                if (!payResponse.ok) {
-                    throw new Error(payData.error || 'Payment initiation failed.');
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Payment initiation failed.');
                 }
 
-                if (!payData.checkoutID) {
-                    throw new Error('Missing checkout ID from payment response.');
-                }
-
-                setProcessingState('Waiting for Confirmation', 'Waiting for Safaricom payment confirmation. Complete the prompt on your phone.', `KES ${amountDue}`);
-                await waitForPaymentSuccess(payData.checkoutID);
-                showSuccess('Payment confirmed. Wait for the barrier to open.');
+                document.getElementById('paymentResponseCard').style.display = 'block';
+                document.getElementById('payMessage').textContent = data.message || 'STK Push initiated';
+                document.getElementById('checkoutIdText').textContent = data.checkoutID || '--';
+                checkStatusButton.style.display = 'block';
             } catch (error) {
-                console.error('Error:', error);
-                alert(error.message || 'Something went wrong. Please check your connection and try again.');
-                showStep(1);
+                console.error('Payment error:', error);
+                setError(error.message || 'Payment initiation failed.');
             } finally {
-                submitButton.disabled = false;
+                setButtonLoading('payButton', false, 'Processing...');
             }
         }
 
-        async function waitForPaymentSuccess(checkoutId) {
-            const startedAt = Date.now();
+        async function checkStatus() {
+            setError('');
 
-            while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
-                await delay(POLL_INTERVAL_MS);
-
-                const statusResponse = await fetch(`${API_BASE}/status/${encodeURIComponent(checkoutId)}`);
-                const statusData = await statusResponse.json();
-
-                if (!statusResponse.ok) {
-                    throw new Error(statusData.error || 'Failed to check payment status.');
-                }
-
-                if (statusData.status === 'COMPLETED') {
-                    return;
-                }
-
-                if (statusData.status === 'FAILED') {
-                    throw new Error('Payment failed. Please try again.');
-                }
+            if (!activeTicketId) {
+                setError('Missing ticket_id in URL.');
+                return;
             }
 
-            throw new Error('Payment confirmation timed out. Please confirm the transaction status and try again.');
-        }
+            setButtonLoading('checkStatusButton', true, 'Checking...');
 
-        function setProcessingState(title, message, amountText) {
-            document.getElementById('statusTitle').textContent = title;
-            document.getElementById('statusMessage').textContent = message;
-            document.getElementById('amountDue').textContent = amountText;
-        }
+            try {
+                const response = await fetch(`${API_BASE}/payment/status?ticket_id=${encodeURIComponent(activeTicketId)}`);
+                const data = await response.json();
 
-        function showSuccess(message) {
-            document.getElementById('successMessage').textContent = message;
-            showStep(3);
-            showToast();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to fetch payment status.');
+                }
+
+                document.getElementById('statusCard').style.display = 'block';
+                document.getElementById('paidStatusText').textContent = data.paid_status || '--';
+                document.getElementById('statusAmountText').textContent = data.amount != null ? `KES ${data.amount}` : '--';
+                document.getElementById('transCodeText').textContent = data.transaction_code || 'Pending';
+
+                if (String(data.paid_status || '').toUpperCase() === 'COMPLETED') {
+                    showToast();
+                }
+            } catch (error) {
+                console.error('Status error:', error);
+                setError(error.message || 'Failed to check status.');
+            } finally {
+                setButtonLoading('checkStatusButton', false, 'Checking...');
+            }
         }
 
         function showStep(stepNum) {
@@ -387,15 +600,13 @@
             document.getElementById('step' + stepNum).classList.add('active');
         }
 
-        function delay(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        }
-
         function showToast() {
             var x = document.getElementById("toast");
             x.className = "show";
             setTimeout(function () { x.className = x.className.replace("show", ""); }, 3000);
         }
+
+        window.addEventListener('DOMContentLoaded', loadCharges);
     </script>
 
 </body>
