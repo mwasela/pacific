@@ -99,9 +99,20 @@ router.post('/api/vehicle/entry', async (req, res) => {
     const visit_timestamp = new Date();
 
     try {
+        if (!ticket_id) {
+            return res.status(400).json({
+                success: false,
+                message: "ticket_id is required"
+            });
+        }
+
+        const normalizedVehicleNumber =
+            typeof vehicle_number === 'string' && vehicle_number.trim()
+                ? vehicle_number.trim().toUpperCase()
+                : '';
 
         const visit = await Visits.create({
-            vehicle_number: vehicle_number.toUpperCase(),
+            vehicle_number: normalizedVehicleNumber,
             ticket_id: ticket_id,
             paid_status: '1',
             visit_timestamp: visit_timestamp,
@@ -130,7 +141,7 @@ router.post('/api/vehicle/entry', async (req, res) => {
         //create a transaction record for this visit with status PENDING
         await Transaction.create({
             visit_id: visit.id,
-            number_plate: visit.vehicle_number,
+            number_plate: visit.vehicle_number || '',
             phone_number: '',
             amount: visit.amount,
             status: 'PEND',
@@ -139,7 +150,7 @@ router.post('/api/vehicle/entry', async (req, res) => {
             payment_timestamp: visit.visit_timestamp // Initialize with visit timestamp, will be updated on payment confirmation
         });
 
-        console.log(`Vehicle entry recorded for ${visit.vehicle_number} at ${visit.visit_timestamp}`);
+        console.log(`Vehicle entry recorded for ${visit.vehicle_number || 'NO_PLATE'} at ${visit.visit_timestamp}`);
 
         res.json(visit);
     } catch (error) {
