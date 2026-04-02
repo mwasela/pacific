@@ -9,8 +9,8 @@ dotenv = require('dotenv');
 dotenv.config();
 
 
-callback_url = "https://b9c5-102-209-18-114.ngrok-free.app/mpesa/callback";
-prod_callback_url = "https://api.eastafricanparking.com/mpesa/callback";
+callback_url = "https://a7ea-102-209-18-114.ngrok-free.app";
+prod_callback_url = "https://test.eastafricanparking.com/mpesa/callback";
 
 const CHARGE_CRON_INTERVAL_MS = 60 * 1000;
 let pendingChargesCronHandle = null;
@@ -130,7 +130,7 @@ const getAccessToken = async (req, res, next) => {
 
 router.get('/charges', async (req, res) => {
 
-        let number_plate = req.query.number_plate;
+        let ticket_id = req.query.ticket_id
         let phone_number = req.query.phone_number;
 
         try {
@@ -145,20 +145,14 @@ router.get('/charges', async (req, res) => {
             return res.status(400).json({ error: "Invalid Kenyan phone number." });
         }
 
-        // 2. Validate Number Plate
-        const plateRegex = /^[A-Z0-9]{1,8}$/i;
-        if (!plateRegex.test(number_plate)) {
-            return res.status(400).json({ error: "Invalid number plate." });
-        }
-
         //check lates visit for this plate
         const visit = await Visits.findOne({
-            where: { vehicle_number: number_plate.toUpperCase(), status: '1' },
+            where: { ticket_id: ticket_id, status: '1' },
             order: [['visit_timestamp', 'DESC']]
         });
 
             if (!visit) {
-                return res.status(404).json({ error: "No active visit found for this number plate." });
+                return res.status(404).json({ error: "No active visit found for this ticket ID." });
             }
         
         //pull associated transaction and updat phone number
@@ -168,7 +162,7 @@ router.get('/charges', async (req, res) => {
         });
 
         if (!transaction) {
-            return res.status(404).json({ error: "No transaction found for this number plate." });
+            return res.status(404).json({ error: "No transaction found for this ticket ID." });
         }
 
         const { amount, elapsedHours } = calculateChargeFromVisitTime(visit.visit_timestamp);
@@ -183,7 +177,7 @@ router.get('/charges', async (req, res) => {
         await visit.save();
 
         res.json({
-            number_plate: visit.vehicle_number,
+            ticket_id: visit.ticket_id,
             visit_timestamp: visit.visit_timestamp,
             elapsed_hours: elapsedHours,
             amount_due: amount,
@@ -291,7 +285,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
                 Password: password,
                 Timestamp: timestamp, // Now matches the EAT password hash
                 TransactionType: "CustomerPayBillOnline",
-                Amount: amount,
+                Amount: 1,
                 PartyA: phone_number,
                 PartyB: shortCode,
                 PhoneNumber: phone_number,

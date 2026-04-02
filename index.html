@@ -98,6 +98,43 @@
             transform: translateY(-2px);
         }
 
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .amount-card {
+            margin: 20px 0;
+            padding: 18px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+        }
+
+        .amount-label {
+            font-size: 0.9rem;
+            opacity: 0.75;
+            margin-bottom: 8px;
+        }
+
+        .amount-value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #00d4ff;
+        }
+
+        .status-copy {
+            min-height: 44px;
+            margin-bottom: 0;
+        }
+
+        footer {
+            margin-top: 24px;
+            opacity: 0.75;
+            font-size: 0.9rem;
+        }
+
         /* Toast Notification */
         #toast {
             visibility: hidden;
@@ -182,37 +219,45 @@
 
     <div class="container">
         <input type="text" id="website_hp" style="display:none !important" tabindex="-1" autocomplete="off">
+        <div id="step1" class="step active">
             <h1>Welcome to <span class="highlight">Pacific</span></h1>
-            <p>Enter details to proceed with parking</p>
+            <p>Enter your number plate and phone number to retrieve charges and pay.</p>
             <input type="text" id="plateNumber" placeholder="Vehicle Plate Number (e.g. KAA 001A)">
             <input type="tel" id="phoneNumber" placeholder="M-Pesa Phone Number (07...)">
-            <button onclick="submitDetails()">Proceed to Pay</button>
-        
+            <button id="submitButton" onclick="submitDetails()">Check Charges & Pay</button>
+        </div>
 
         <div id="step2" class="step">
             <div class="loader"></div>
-            <h2>Processing Payment</h2>
-            <p>Please enter your <b>M-Pesa PIN</b> on the prompt sent to your phone.</p>
+            <h2 id="statusTitle">Checking Charges</h2>
+            <div class="amount-card">
+                <div class="amount-label">Amount Due</div>
+                <div class="amount-value" id="amountDue">KES 0</div>
+            </div>
+            <p class="status-copy" id="statusMessage">Retrieving your active visit and current parking charges.</p>
         </div>
 
         <div id="step3" class="step">
-            <h1 style="color: #28a745;">✔ Payment Submitted</h1>
-            <p>Payment Submitted, Wait for the barrier to open.</p>
+            <h1 style="color: #28a745;">Payment Successful</h1>
+            <p id="successMessage">Payment confirmed. Wait for the barrier to open.</p>
             <div class="badge"
                 style="border-color: #28a745; color: #28a745; padding: 10px 20px; border: 2px solid; border-radius: 30px;">
                 Access Granted</div>
         </div>
 
         <footer>
-            © 2026 Pacific Parking.
+            © 2026 Medici Secure Services. Powered by Nuricha
         </footer>
     </div>
 
     <div id="toast">Barrier Opening... Drive Safe!</div>
 
     <script>
+        const API_BASE = 'https://test.eastafricanparking.com'
+        const POLL_INTERVAL_MS = 3000;
+        const POLL_TIMEOUT_MS = 120000;
+
         async function submitDetails() {
-            // 1. Honeypot check: If this hidden field is filled, it's a bot.
             const botField = document.getElementById('website_hp').value;
             if (botField) {
                 console.warn("Bot detected.");
@@ -221,57 +266,129 @@
 
             const plate = document.getElementById('plateNumber').value.trim().toUpperCase();
             const phone = document.getElementById('phoneNumber').value.trim();
+            const submitButton = document.getElementById('submitButton');
 
-            // 2. Basic Validation
             if (!plate || !phone) {
                 alert("Please fill in all fields.");
                 return;
             }
 
-            // 3. Kenyan Phone Validation (Regex for 07... or 01... or 254...)
             const phoneRegex = /^(?:254|\+254|0)?(7|1)(?:[0-9]){8}$/;
             if (!phoneRegex.test(phone)) {
                 alert("Please enter a valid M-Pesa number (e.g., 0712345678).");
                 return;
             }
 
-            // Switch to Processing UI
+            submitButton.disabled = true;
             showStep(2);
+            setProcessingState('Checking Charges', 'Retrieving your active visit and current parking charges.', 'KES --');
 
             try {
-                const response = await fetch('http://localhost:3000/payment/pay', {
+                const chargeResponse = await fetch(`${API_BASE}/payment/charges?number_plate=${encodeURIComponent(plate)}&phone_number=${encodeURIComponent(phone)}`);
+                const chargeData = await chargeResponse.json();
+
+                if (!chargeResponse.ok) {
+                    throw new Error(chargeData.error || 'Failed to retrieve charges.');
+                }
+
+                const amountDue = Number(chargeData.amount_due || 0);
+                const visitId = chargeData.visit_id;
+
+                setProcessingState(
+                    'Charge Retrieved',
+                    amountDue === 0
+                        ? 'No payment is required for this visit. You can proceed.'
+                        : 'Charge retrieved successfully. Sending M-Pesa prompt to your phone now.',
+                    `KES ${amountDue}`
+                );
+
+                if (!visitId) {
+                    throw new Error('Visit ID missing from charges response.');
+                }
+
+                if (amountDue === 0) {
+                    showSuccess('No payment is required for this visit. You may proceed to the barrier.');
+                    return;
+                }
+
+                setProcessingState('Processing Payment', 'Please enter your M-Pesa PIN on the prompt sent to your phone.', `KES ${amountDue}`);
+
+                const payResponse = await fetch(`${API_BASE}/payment/pay`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest' // Helps backend identify AJAX
+                        'X-Requested-With': 'XMLHttpRequest'
                     },
                     body: JSON.stringify({
-                        number_plate: plate,
-                        phone_number: phone,
-                        timestamp: new Date().toISOString()
+                        visit_id: visitId
                     })
                 });
+                const payData = await payResponse.json();
 
-                // We assume a 200 OK starts the M-Pesa push
-                if (response.ok) {
-                    setTimeout(() => {
-                        showStep(3);
-                        showToast();
-                    }, 4000); // 4 seconds delay to simulate user entering PIN
-                } else {
-                    throw new Error("Server responded with an error.");
+                if (!payResponse.ok) {
+                    throw new Error(payData.error || 'Payment initiation failed.');
                 }
 
+                if (!payData.checkoutID) {
+                    throw new Error('Missing checkout ID from payment response.');
+                }
+
+                setProcessingState('Waiting for Confirmation', 'Waiting for Safaricom payment confirmation. Complete the prompt on your phone.', `KES ${amountDue}`);
+                await waitForPaymentSuccess(payData.checkoutID);
+                showSuccess('Payment confirmed. Wait for the barrier to open.');
             } catch (error) {
                 console.error('Error:', error);
-                alert("Something went wrong. Please check your connection and try again.");
+                alert(error.message || 'Something went wrong. Please check your connection and try again.');
                 showStep(1);
+            } finally {
+                submitButton.disabled = false;
             }
+        }
+
+        async function waitForPaymentSuccess(checkoutId) {
+            const startedAt = Date.now();
+
+            while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
+                await delay(POLL_INTERVAL_MS);
+
+                const statusResponse = await fetch(`${API_BASE}/status/${encodeURIComponent(checkoutId)}`);
+                const statusData = await statusResponse.json();
+
+                if (!statusResponse.ok) {
+                    throw new Error(statusData.error || 'Failed to check payment status.');
+                }
+
+                if (statusData.status === 'COMPLETED') {
+                    return;
+                }
+
+                if (statusData.status === 'FAILED') {
+                    throw new Error('Payment failed. Please try again.');
+                }
+            }
+
+            throw new Error('Payment confirmation timed out. Please confirm the transaction status and try again.');
+        }
+
+        function setProcessingState(title, message, amountText) {
+            document.getElementById('statusTitle').textContent = title;
+            document.getElementById('statusMessage').textContent = message;
+            document.getElementById('amountDue').textContent = amountText;
+        }
+
+        function showSuccess(message) {
+            document.getElementById('successMessage').textContent = message;
+            showStep(3);
+            showToast();
         }
 
         function showStep(stepNum) {
             document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
             document.getElementById('step' + stepNum).classList.add('active');
+        }
+
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
         }
 
         function showToast() {

@@ -4,6 +4,12 @@ const { DataTypes } = require('sequelize');
 const Visits = sequelizeInstance.define('Visits', {
     vehicle_number: {
         type: DataTypes.STRING,
+        allowNull: true
+    },
+    ticket_id:{
+        type:DataTypes.STRING,
+        //unique
+        unique: true,
         allowNull: false
     },
     paid_status: {

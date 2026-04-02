@@ -94,16 +94,15 @@ router.post('/mpesa/callback', async (req, res) => {
 
 router.post('/api/vehicle/entry', async (req, res) => {
 
-    const { vehicle_number } = req.body;
+    const { vehicle_number, ticket_id } = req.body;
     // Store in UTC and convert only when displaying.
     const visit_timestamp = new Date();
 
     try {
 
-        console.log("am here");
-
         const visit = await Visits.create({
             vehicle_number: vehicle_number.toUpperCase(),
+            ticket_id: ticket_id,
             paid_status: '1',
             visit_timestamp: visit_timestamp,
             amount: 5,
@@ -145,7 +144,7 @@ router.post('/api/vehicle/entry', async (req, res) => {
         res.json(visit);
     } catch (error) {
         console.error("Error recording vehicle entry:", error);
-        res.status(500).json({ success: false, message: error });
+        res.status(500).json({ success: false, message: error.message });
     }
 
 });
@@ -153,12 +152,27 @@ router.post('/api/vehicle/entry', async (req, res) => {
 
 router.post('/api/vehicle/exit', async (req, res) => {
 
-    const { vehicle_number } = req.body;
+    const { vehicle_number, ticket_id } = req.body;
     const exit_timestamp = new Date();
 
     try {
+        if (!ticket_id) {
+            return res.status(400).json({
+                status: {
+                 faultcode: "-1",
+                    message: "Vehicle exit not successful",
+                    detail: "ticket_id is required."
+                }
+            });
+        }
+
+        const visitWhere = { ticket_id: ticket_id };
+        if (vehicle_number) {
+            visitWhere.vehicle_number = vehicle_number;
+        }
+
         const visit = await Visits.findOne({
-            where: { vehicle_number: vehicle_number },
+            where: visitWhere,
             order: [['visit_timestamp', 'DESC']]
         });
 
