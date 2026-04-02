@@ -130,8 +130,7 @@ const getAccessToken = async (req, res, next) => {
 
 router.get('/charges', async (req, res) => {
 
-    let ticket_id = req.query.ticket_id
-    // let phone_number = req.query.phone_number;
+    const ticket_id = req.query.ticket_id;
 
     try {
 
@@ -139,19 +138,7 @@ router.get('/charges', async (req, res) => {
             return res.status(400).json({ error: "ticket_id is required." });
         }
 
-        // 1. Sanitize & Validate Phone Number
-        if (phone_number) {
-            if (phone_number.startsWith('0')) {
-                phone_number = '254' + phone_number.substring(1);
-            }
-
-            const phoneRegex = /^(2547|2541)\d{8}$/;
-            if (!phoneRegex.test(phone_number)) {
-                return res.status(400).json({ error: "Invalid Kenyan phone number." });
-            }
-        }
-
-        //check lates visit for this plate
+        //check latest visit for this ticket
         const visit = await Visits.findOne({
             where: { ticket_id: ticket_id, status: '1' },
             order: [['visit_timestamp', 'DESC']]
@@ -161,7 +148,7 @@ router.get('/charges', async (req, res) => {
             return res.status(404).json({ error: "No active visit found for this ticket ID." });
         }
 
-        //pull associated transaction and updat phone number
+        //pull associated transaction
         const transaction = await Transaction.findOne({
             where: { visit_id: visit.id },
             order: [['createdAt', 'DESC']]
@@ -173,9 +160,6 @@ router.get('/charges', async (req, res) => {
 
         const { amount, elapsedHours } = calculateChargeFromVisitTime(visit.visit_timestamp);
 
-        if (phone_number) {
-            transaction.phone_number = phone_number;
-        }
         transaction.amount = amount;
         await transaction.save();
 
