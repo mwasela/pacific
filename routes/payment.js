@@ -26,7 +26,6 @@ const THIRD_HOUR_RATE = 100;
 const EXTRA_HOURLY_RATE = 50;
 const DAYTIME_CAP = 600;
 const OVERNIGHT_BASE_RATE = 1000;
-const OVERNIGHT_HOURLY_RATE = 50;
 
 const calculateChargeFromVisitTime = (visitTimestamp, now = new Date()) => {
     const visitTime = new Date(visitTimestamp);
@@ -54,11 +53,8 @@ const calculateChargeFromVisitTime = (visitTimestamp, now = new Date()) => {
 
     let amount;
     if (isOvernight) {
-        const firstMidnightNairobiMs = (visitNairobiDay + 1) * DAY_IN_MS;
-        const minutesUntilFirstMidnight = Math.max(0, Math.ceil((firstMidnightNairobiMs - visitNairobiMs) / (1000 * 60)));
-        const overnightElapsedMinutes = Math.max(0, elapsedMinutes - minutesUntilFirstMidnight);
-        const overnightHours = Math.max(1, Math.ceil(overnightElapsedMinutes / 60));
-        amount = OVERNIGHT_BASE_RATE + ((overnightHours - 1) * OVERNIGHT_HOURLY_RATE);
+        const overnightDays = nowNairobiDay - visitNairobiDay;
+        amount = overnightDays * OVERNIGHT_BASE_RATE;
     } else if (elapsedMinutes <= FREE_MINUTES) {
         amount = 0;
     } else if (elapsedMinutes <= FIRST_HOUR_MINUTES) {
