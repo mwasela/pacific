@@ -1,5 +1,6 @@
 const express = require('express');
 const axios = require('axios');
+const { Op } = require('sequelize');
 const router = express.Router();
 const Transaction = require('../model/Transaction');
 const fs = require('fs');
@@ -14,6 +15,18 @@ prod_callback_url = "https://test.eastafricanparking.com/mpesa/callback";
 
 const CHARGE_CRON_INTERVAL_MS = 60 * 1000;
 let pendingChargesCronHandle = null;
+
+const NAIROBI_UTC_OFFSET_MS = 3 * 60 * 60 * 1000;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const FREE_MINUTES = 15;
+const FIRST_HOUR_MINUTES = 60;
+const THIRD_HOUR_MINUTES = 180;
+const FIRST_HOUR_RATE = 50;
+const THIRD_HOUR_RATE = 100;
+const EXTRA_HOURLY_RATE = 50;
+const DAYTIME_CAP = 600;
+const OVERNIGHT_BASE_RATE = 1000;
+const OVERNIGHT_HOURLY_RATE = 50;
 
 const calculateChargeFromVisitTime = (visitTimestamp, now = new Date()) => {
     const visitTime = new Date(visitTimestamp);
@@ -33,23 +46,29 @@ const calculateChargeFromVisitTime = (visitTimestamp, now = new Date()) => {
     const elapsedMinutes = Math.max(0, Math.ceil(elapsedTime / (1000 * 60)));
     const elapsedHours = Math.max(0, Math.ceil(elapsedMinutes / 60));
 
-    const nowNairobiDate = now.toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
-    const visitNairobiDate = effectiveVisitTime.toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
-    const isOvernight = elapsedTime > 0 && nowNairobiDate !== visitNairobiDate;
+    const nowNairobiMs = now.getTime() + NAIROBI_UTC_OFFSET_MS;
+    const visitNairobiMs = effectiveVisitTime.getTime() + NAIROBI_UTC_OFFSET_MS;
+    const nowNairobiDay = Math.floor(nowNairobiMs / DAY_IN_MS);
+    const visitNairobiDay = Math.floor(visitNairobiMs / DAY_IN_MS);
+    const isOvernight = elapsedTime > 0 && nowNairobiDay > visitNairobiDay;
 
     let amount;
     if (isOvernight) {
-        amount = 1000;
-    } else if (elapsedMinutes <= 15) {
+        const firstMidnightNairobiMs = (visitNairobiDay + 1) * DAY_IN_MS;
+        const minutesUntilFirstMidnight = Math.max(0, Math.ceil((firstMidnightNairobiMs - visitNairobiMs) / (1000 * 60)));
+        const overnightElapsedMinutes = Math.max(0, elapsedMinutes - minutesUntilFirstMidnight);
+        const overnightHours = Math.max(1, Math.ceil(overnightElapsedMinutes / 60));
+        amount = OVERNIGHT_BASE_RATE + ((overnightHours - 1) * OVERNIGHT_HOURLY_RATE);
+    } else if (elapsedMinutes <= FREE_MINUTES) {
         amount = 0;
-    } else if (elapsedMinutes <= 60) {
-        amount = 50;
-    } else if (elapsedMinutes <= 180) {
-        amount = 100;
+    } else if (elapsedMinutes <= FIRST_HOUR_MINUTES) {
+        amount = FIRST_HOUR_RATE;
+    } else if (elapsedMinutes <= THIRD_HOUR_MINUTES) {
+        amount = THIRD_HOUR_RATE;
     } else {
-        const extraHours = Math.ceil((elapsedMinutes - 180) / 60);
-        amount = 100 + (extraHours * 50);
-        amount = Math.min(amount, 600);
+        const extraHours = Math.ceil((elapsedMinutes - THIRD_HOUR_MINUTES) / 60);
+        amount = THIRD_HOUR_RATE + (extraHours * EXTRA_HOURLY_RATE);
+        amount = Math.min(amount, DAYTIME_CAP);
     }
 
     return {
@@ -65,11 +84,27 @@ const recalculatePendingVisitsCharges = async () => {
             order: [['visit_timestamp', 'DESC']]
         });
 
+        if (pendingVisits.length === 0) {
+            return;
+        }
+
+        const visitIds = pendingVisits.map((visit) => visit.id);
+        const recentTransactions = await Transaction.findAll({
+            where: {
+                visit_id: { [Op.in]: visitIds }
+            },
+            order: [['visit_id', 'ASC'], ['createdAt', 'DESC']]
+        });
+
+        const latestTransactionByVisitId = new Map();
+        for (const transaction of recentTransactions) {
+            if (!latestTransactionByVisitId.has(transaction.visit_id)) {
+                latestTransactionByVisitId.set(transaction.visit_id, transaction);
+            }
+        }
+
         for (const visit of pendingVisits) {
-            const transaction = await Transaction.findOne({
-                where: { visit_id: visit.id },
-                order: [['createdAt', 'DESC']]
-            });
+            const transaction = latestTransactionByVisitId.get(visit.id);
 
             if (!transaction || transaction.status === 'COMPLETED') {
                 continue;
@@ -159,14 +194,25 @@ router.get('/charges', async (req, res) => {
         }
 
         const { amount, elapsedHours } = calculateChargeFromVisitTime(visit.visit_timestamp);
-
-        transaction.amount = amount;
-        await transaction.save();
+        if (transaction.amount !== amount) {
+            transaction.amount = amount;
+            await transaction.save();
+        }
 
         //update visit record with calculated amount and hours
-        visit.hours = elapsedHours < 1 ? 1 : elapsedHours;
-        visit.amount = amount;
-        await visit.save();
+        const normalizedHours = elapsedHours < 1 ? 1 : elapsedHours;
+        let visitChanged = false;
+        if (visit.hours !== normalizedHours) {
+            visit.hours = normalizedHours;
+            visitChanged = true;
+        }
+        if (visit.amount !== amount) {
+            visit.amount = amount;
+            visitChanged = true;
+        }
+        if (visitChanged) {
+            await visit.save();
+        }
 
         res.json({
             ticket_id: visit.ticket_id,

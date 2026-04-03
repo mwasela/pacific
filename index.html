@@ -495,7 +495,15 @@
                 }
 
                 document.getElementById('amountDue').textContent = `KES ${Number(data.amount_due || 0)}`;
-                document.getElementById('visitTimeText').textContent = data.visit_timestamp || '--';
+                const visitTime = data.visit_timestamp
+                    ? new Date(data.visit_timestamp).toLocaleString('en-KE', {
+                        timeZone: 'Africa/Nairobi',
+                        year: 'numeric', month: 'short', day: '2-digit',
+                        hour: '2-digit', minute: '2-digit', second: '2-digit',
+                        hour12: false
+                      })
+                    : '--';
+                document.getElementById('visitTimeText').textContent = visitTime;
                 document.getElementById('elapsedHoursText').textContent = data.elapsed_hours ?? '--';
             } catch (error) {
                 console.error('Error loading charges:', error);
