@@ -11,7 +11,7 @@ dotenv.config();
 
 
 callback_url = "https://a7ea-102-209-18-114.ngrok-free.app";
-prod_callback_url = "https://test.eastafricanparking.com/mpesa/callback";
+prod_callback_url = "https://api.eastafricanparking.com/mpesa/callback";
 
 const CHARGE_CRON_INTERVAL_MS = 60 * 1000;
 let pendingChargesCronHandle = null;
@@ -347,7 +347,7 @@ router.post('/pay', getAccessToken, async (req, res) => {
                 Password: password,
                 Timestamp: timestamp, // Now matches the EAT password hash
                 TransactionType: "CustomerPayBillOnline",
-                Amount: 1,
+                Amount: amount,
                 PartyA: phone_number,
                 PartyB: shortCode,
                 PhoneNumber: phone_number,

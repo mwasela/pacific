@@ -8,6 +8,8 @@ const cors = require('cors');
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
 const paymentRouter = require('./routes/payment');
+const transactionsRouter = require('./routes/transactions');
+const analyticsRouter = require('./routes/analytics');
 
 var app = express();
 
@@ -25,6 +27,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/', indexRouter);
 app.use('/users', usersRouter);
 app.use('/payment', paymentRouter);
+app.use('/transactions', transactionsRouter);
+app.use('/analytics', analyticsRouter);
+
 
 if (typeof paymentRouter.startPendingChargesCron === 'function') {
   paymentRouter.startPendingChargesCron();
