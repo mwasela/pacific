@@ -292,7 +292,7 @@ router.post('/api/vehicle/exit', async (req, res) => {
 
         visit.exit_timestamp = exit_timestamp;
         visit.hours = durationHours;
-        visit.status = '2'; // Mark visit as completed
+        visit.status = '0'; // Mark visit as completed
         visit.paid_status = '0'; // Mark as paid for simplicity, in real case you would check payment status
         await visit.save();
 
