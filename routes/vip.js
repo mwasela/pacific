@@ -4,6 +4,14 @@ const authenticateToken = require('../middleware/auth');
 const VIP = require('../model/VIP');
 const Setup = require('../model/Setup');
 
+const hasVipExpired = (vip) => {
+    if (!vip || !vip.vip_expiry) {
+        return true;
+    }
+
+    return new Date(vip.vip_expiry).getTime() < Date.now();
+};
+
 // Get VIP details for all vehicles
 router.get('/', authenticateToken, async (req, res) => {
     try {
@@ -86,12 +94,56 @@ router.put('/:id', authenticateToken, async (req, res) => {
         console.error('Error updating VIP vehicle details:', error);
         res.status(500).json({ message: 'Internal server error' });
 
-    }});
-        
-    
+    }
+});
 
 
+router.post('/entry', async (req, res) => {
+    const { vehicle_number } = req.body;
+    try {
+        const vip = await VIP.findOne({ where: { vehicle_number } });
+        if (!vip) {
+            return res.status(404).json({ message: 'VIP vehicle not found' });
+        }
+        if (hasVipExpired(vip)) {
+            return res.status(400).json({ message: 'VIP vehicle membership has expired' });
+        }
+        res.json({ 
+                message: 'VIP vehicle entry allowed', 
+                number_plate: vip.vehicle_number,
+                status: 1,
+                success: 0
+                
+         });
+    } catch (error) {
+        console.error('Error checking VIP vehicle entry:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
 
 
-    module.exports = router;
+router.post('/exit', async (req, res) => {
+    const { vehicle_number } = req.body;
+    try {
+        const vip = await VIP.findOne({ where: { vehicle_number } });
+        if (!vip) {
+            return res.status(404).json({ message: 'VIP vehicle not found' });
+        }
+        if (hasVipExpired(vip)) {
+            return res.status(400).json({ message: 'VIP vehicle membership has expired' });
+        }
+        res.json({
+             message: 'VIP vehicle exit allowed', 
+             number_plate: vip.vehicle_number,
+             status: 2,
+             success: 0
+             });
+    } catch (error) {
+        console.error('Error checking VIP vehicle exit:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+
+module.exports = router;
 
