@@ -4,6 +4,8 @@ const fs = require('fs');
 const axios = require('axios');
 const Transaction = require('../model/Transaction');
 const dotenv = require('dotenv');
+const VIP = require('../model/VIP');
+const Vippayments = require('../model/Vippayments');
 const { console } = require('inspector');
 const Visits = require('../model/Visits');
 
@@ -32,6 +34,60 @@ router.get('/status/:checkoutID', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
+});
+
+
+router.post('/mpesa/callback/vip', async (req, res) => {
+    const callbackData = req.body.Body.stkCallback;
+    const checkoutID = callbackData.CheckoutRequestID;
+    const resultCode = callbackData.ResultCode;
+    
+    if (resultCode === 0) {
+        const metadata = callbackData.CallbackMetadata.Item;
+        const getValue = (name) => metadata.find(item => item.Name === name)?.Value;
+        
+        const mpesaReceipt = getValue('MpesaReceiptNumber');
+        const rawDate = getValue('TransactionDate').toString();
+        const formattedDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)} ${rawDate.substring(8, 10)}:${rawDate.substring(10, 12)}:${rawDate.substring(12, 14)}`;
+        
+        try {
+            const transaction = await Vippayments.findOne({ where: { checkoutID } });
+            if (!transaction) {
+                console.error("Transaction not found for checkoutID:", checkoutID);
+                return res.status(404).json({ error: "Transaction not found" });
+            }
+
+            transaction.status = 'COMPLETED';
+            transaction.transaction_code = mpesaReceipt;
+            transaction.Transaction_timestamp = new Date(formattedDate);
+            await transaction.save();
+
+
+            const VIPRecord = await VIP.findOne({ where: { vehicle_number: transaction.number_plate } });
+            if (VIPRecord) {
+                //add 30 days to todays date for vip expiry
+                VIPRecord.vip_expiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                await VIPRecord.save();
+                console.log(`VIP status updated for plate ${transaction.number_plate}, VIP expiry set to ${VIPRecord.vip_expiry}`);
+            } else {
+                console.error("VIP record not found for plate:", transaction.number_plate);
+            }
+
+            console.log(`VIP Transaction ${mpesaReceipt} saved for plate ${transaction.number_plate}`);
+        } catch (dbError) {
+            console.error("Database Error:", dbError.message);
+        }
+    } else {
+        //fs write
+        fs.appendFile('vip_failed_transactions.log', `VIP Transaction ${checkoutID} failed with code ${resultCode}\n`, (err) => {
+            if (err) console.error("Error writing to log file:", err);
+        });
+
+        console.log(`VIP Transaction ${checkoutID} failed with code ${resultCode}`);
+    }
+    
+    res.json({ ResultCode: 0, ResultDesc: "Accepted" });
+
 });
 
 

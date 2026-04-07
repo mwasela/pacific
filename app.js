@@ -10,6 +10,9 @@ var usersRouter = require('./routes/users');
 const paymentRouter = require('./routes/payment');
 const transactionsRouter = require('./routes/transactions');
 const analyticsRouter = require('./routes/analytics');
+const vipRouter = require('./routes/vip');
+const setupRouter = require('./routes/setup');
+const Vippayments = require('./routes/viptransactions');
 
 var app = express();
 
@@ -29,6 +32,9 @@ app.use('/users', usersRouter);
 app.use('/payment', paymentRouter);
 app.use('/transactions', transactionsRouter);
 app.use('/analytics', analyticsRouter);
+app.use('/vip', vipRouter);
+app.use('/setup', setupRouter);
+app.use('/vippayments', Vippayments);
 
 
 if (typeof paymentRouter.startPendingChargesCron === 'function') {
