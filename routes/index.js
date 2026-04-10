@@ -233,7 +233,7 @@ router.post('/api/vehicle/exit', async (req, res) => {
             });
         }
 
-        const visitWhere = { ticket_id: ticket_id };
+        const visitWhere = { ticket_id: ticket_id, status: '1' };
         if (vehicle_number) {
             visitWhere.vehicle_number = vehicle_number;
         }
@@ -244,6 +244,26 @@ router.post('/api/vehicle/exit', async (req, res) => {
         });
 
         if (!visit) {
+            const historicalWhere = { ticket_id: ticket_id };
+            if (vehicle_number) {
+                historicalWhere.vehicle_number = vehicle_number;
+            }
+
+            const historicalVisit = await Visits.findOne({
+                where: historicalWhere,
+                order: [['visit_timestamp', 'DESC']]
+            });
+
+            if (historicalVisit) {
+                return res.status(400).json({
+                    status: {
+                        faultcode: "-1",
+                        message: "Vehicle exit not successful",
+                        detail: "ticket expired"
+                    }
+                });
+            }
+
             return res.status(404).json({
                 status: {
                     faultcode: "-1",
