@@ -13,6 +13,67 @@ const Visits = require('../model/Visits');
 
 dotenv.config();
 
+const PAID_EXIT_GRACE_MINUTES = 30;
+const NAIROBI_UTC_OFFSET_MS = 3 * 60 * 60 * 1000;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const FREE_MINUTES = 30;
+const FIRST_HOUR_MINUTES = 60;
+const THIRD_HOUR_MINUTES = 180;
+const FIRST_HOUR_RATE = 50;
+const THIRD_HOUR_RATE = 100;
+const EXTRA_HOURLY_RATE = 50;
+const DAYTIME_CAP = 600;
+const OVERNIGHT_BASE_RATE = 1000;
+
+const calculateChargeFromTimestamp = (startTimestamp, endTimestamp = new Date()) => {
+    const startTime = new Date(startTimestamp);
+    const endTime = new Date(endTimestamp);
+
+    let effectiveStartTime = startTime;
+    let elapsedTime = endTime.getTime() - effectiveStartTime.getTime();
+
+    // Backward compatibility: older entries were stored as now+3h.
+    if (elapsedTime < 0) {
+        const legacyStartTime = new Date(startTime.getTime() - (3 * 60 * 60 * 1000));
+        const legacyElapsed = endTime.getTime() - legacyStartTime.getTime();
+        if (legacyElapsed >= 0) {
+            effectiveStartTime = legacyStartTime;
+            elapsedTime = legacyElapsed;
+        }
+    }
+
+    const elapsedMinutes = Math.max(0, Math.ceil(elapsedTime / (1000 * 60)));
+    const elapsedHours = Math.max(0, Math.ceil(elapsedMinutes / 60));
+
+    const endNairobiMs = endTime.getTime() + NAIROBI_UTC_OFFSET_MS;
+    const startNairobiMs = effectiveStartTime.getTime() + NAIROBI_UTC_OFFSET_MS;
+    const endNairobiDay = Math.floor(endNairobiMs / DAY_IN_MS);
+    const startNairobiDay = Math.floor(startNairobiMs / DAY_IN_MS);
+    const isOvernight = elapsedTime > 0 && endNairobiDay > startNairobiDay;
+
+    let amount;
+    if (isOvernight) {
+        const overnightDays = endNairobiDay - startNairobiDay;
+        amount = overnightDays * OVERNIGHT_BASE_RATE;
+    } else if (elapsedMinutes <= FREE_MINUTES) {
+        amount = 0;
+    } else if (elapsedMinutes <= FIRST_HOUR_MINUTES) {
+        amount = FIRST_HOUR_RATE;
+    } else if (elapsedMinutes <= THIRD_HOUR_MINUTES) {
+        amount = THIRD_HOUR_RATE;
+    } else {
+        const extraHours = Math.ceil((elapsedMinutes - THIRD_HOUR_MINUTES) / 60);
+        amount = THIRD_HOUR_RATE + (extraHours * EXTRA_HOURLY_RATE);
+        amount = Math.min(amount, DAYTIME_CAP);
+    }
+
+    return {
+        amount,
+        elapsedMinutes,
+        elapsedHours
+    };
+};
+
 /* GET home page. */
 router.get('/', function (req, res, next) {
     res.render('index', { title: 'Pacific Gateway' });
@@ -122,6 +183,7 @@ router.post('/mpesa/callback', async (req, res) => {
             transaction.status = 'COMPLETED';
             transaction.transaction_code = mpesaReceipt;
             transaction.Transaction_timestamp = new Date(formattedDate);
+            transaction.payment_timestamp = new Date(formattedDate);
             await transaction.save();
 
             console.log(`Transaction ${mpesaReceipt} saved for plate ${transaction.number_plate}`);
@@ -296,6 +358,42 @@ router.post('/api/vehicle/exit', async (req, res) => {
                     detail: "Payment not completed for this visit."
                 }
             });
+        }
+
+        if (!isFreeExit && transaction.status === 'COMPLETED') {
+            const paymentReference = transaction.payment_timestamp || transaction.Transaction_timestamp;
+
+            if (paymentReference) {
+                const paidElapsedMinutes = Math.floor((exit_timestamp.getTime() - new Date(paymentReference).getTime()) / (1000 * 60));
+
+                if (paidElapsedMinutes > PAID_EXIT_GRACE_MINUTES) {
+                    const overstayCharge = calculateChargeFromTimestamp(paymentReference, exit_timestamp);
+                    const amountDue = overstayCharge.amount;
+
+                    if (amountDue > 0) {
+                        visit.amount = amountDue;
+                        visit.hours = overstayCharge.elapsedHours < 1 ? 1 : overstayCharge.elapsedHours;
+                        visit.paid_status = '1';
+                        await visit.save();
+
+                        transaction.amount = amountDue;
+                        transaction.status = 'PEND';
+                        transaction.transaction_code = null;
+                        transaction.payment_timestamp = null;
+                        await transaction.save();
+
+                        return res.status(400).json({
+                            status: {
+                                faultcode: "-1",
+                                message: "Vehicle exit not successful",
+                                detail: "Additional payment required. Ticket exceeded 30-minute paid grace period.",
+                                ticket_id: visit.ticket_id,
+                                amount_due: amountDue
+                            }
+                        });
+                    }
+                }
+            }
         }
 
         // For free visits, mark transaction as completed to keep records consistent.

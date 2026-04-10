@@ -23,7 +23,7 @@ let pendingChargesCronHandle = null;
 
 const NAIROBI_UTC_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
-const FREE_MINUTES = 15;
+const FREE_MINUTES = 30;
 const FIRST_HOUR_MINUTES = 60;
 const THIRD_HOUR_MINUTES = 180;
 const FIRST_HOUR_RATE = 50;
