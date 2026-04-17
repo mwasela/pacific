@@ -31,6 +31,11 @@ const VIP = sequelizeInstance.define('VIP', {
         allowNull: false,
         defaultValue: 1
     },
+    // vip_card_number: {
+    //     type: DataTypes.STRING,
+    //     allowNull: false,
+    //     unique: true
+    // },
     vip_expiry: {
         type: DataTypes.DATE,
         allowNull: false,
