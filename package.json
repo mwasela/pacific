@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "node ./bin/www"
+    "start": "node ./bin/www",
+    "migrate:sql": "node scripts/run-sql-migration.js",
+    "migrate:transaction-indexes": "node scripts/run-sql-migration.js migrations/20260421_add_transaction_indexes.sql"
   },
   "dependencies": {
     "axios": "^1.13.6",

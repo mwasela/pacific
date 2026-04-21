@@ -4,6 +4,7 @@ var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 const cors = require('cors');
+const sequelizeInstance = require('./config/database');
 
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
@@ -40,6 +41,14 @@ app.use('/vippayments', Vippayments);
 if (typeof paymentRouter.startPendingChargesCron === 'function') {
   paymentRouter.startPendingChargesCron();
 }
+
+sequelizeInstance.sync()
+  .then(() => {
+    console.log('Database sync completed successfully.');
+  })
+  .catch((err) => {
+    console.error('Database sync failed:', err);
+  });
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {

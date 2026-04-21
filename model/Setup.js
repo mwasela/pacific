@@ -27,14 +27,4 @@ const Setup = sequelizeInstance.define('Setup', {
     timestamps: true
 });
 
-sequelizeInstance.sync({
-    // force: true // Use with caution - this will drop the table if it already exists
-    // alter: true // Use this in development to update the table structure without dropping it
-}).then(() => {
-    console.log("Setup table synced successfully.");
-}).catch(err => {
-    console.error("Failed to sync Setup table:", err);
-});
-
-
 module.exports = Setup;

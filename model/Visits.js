@@ -50,14 +50,4 @@ const Visits = sequelizeInstance.define('Visits', {
     timestamps: true
 });
 
-
-sequelizeInstance.sync({
-    // force: true // Use with caution - this will drop the table if it already exists
-    // alter: true // Use this in development to update the table structure without dropping it
-}).then(() => {
-    console.log("Visits table synced successfully.");
-}).catch(err => {
-    console.error("Failed to sync Visits table:", err);
-})
-
 module.exports = Visits;    

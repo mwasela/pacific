@@ -42,15 +42,4 @@ const Vippayments = sequelize.define('Vippayments', {
     timestamps: true
 });
 
-
-sequelize.sync({
-    // force: true // Use with caution - this will drop the table if it already exists
-    // alter: true // Use this in development to update the table structure without dropping it
-}).then(() => {
-    console.log("Transaction table synced successfully.");
-}).catch(err => {
-    console.error("Failed to sync Transaction table:", err);        
-
-})
-
 module.exports = Vippayments;

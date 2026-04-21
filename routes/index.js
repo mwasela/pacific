@@ -8,6 +8,7 @@ const VIP = require('../model/VIP');
 const Vippayments = require('../model/Vippayments');
 const { console } = require('inspector');
 const Visits = require('../model/Visits');
+const AuthenticateToken = require('../middleware/auth');
 
 
 
@@ -217,27 +218,35 @@ router.post('/api/vehicle/entry', async (req, res) => {
     const visit_timestamp = new Date();
 
     try {
-        if (!ticket_id) {
+        const normalizedVehicleNumber =
+            typeof vehicle_number === 'string' && vehicle_number.trim()
+                ? vehicle_number.trim().toUpperCase()
+                : '';
+
+        const activeVip = normalizedVehicleNumber
+            ? await VIP.findOne({ where: { vehicle_number: normalizedVehicleNumber, vip_status: 1 } })
+            : null;
+        const isVipEntry = Boolean(activeVip);
+        const resolvedTicketId = ticket_id
+            ? String(ticket_id).trim()
+            : (isVipEntry ? `VIP_${Date.now()}_${normalizedVehicleNumber || 'NO_PLATE'}` : '');
+
+        if (!resolvedTicketId) {
             return res.status(400).json({
                 success: false,
                 message: "ticket_id is required"
             });
         }
 
-        const normalizedVehicleNumber =
-            typeof vehicle_number === 'string' && vehicle_number.trim()
-                ? vehicle_number.trim().toUpperCase()
-                : '';
-
         const visit = await Visits.create({
             vehicle_number: normalizedVehicleNumber,
-            ticket_id: ticket_id,
-            paid_status: '1',
+            ticket_id: resolvedTicketId,
+            paid_status: isVipEntry ? '0' : '1',
             visit_timestamp: visit_timestamp,
-            amount: 5,
+            amount: isVipEntry ? 0 : 5,
             hours: 1,
             status: '1',
-            user_type: 0
+            user_type: isVipEntry ? 2 : 0
         });
 
         console.log("Visit record created:", visit.toJSON());
@@ -262,7 +271,8 @@ router.post('/api/vehicle/entry', async (req, res) => {
             number_plate: visit.vehicle_number || '',
             phone_number: '',
             amount: visit.amount,
-            status: 'PEND',
+            status: isVipEntry ? 'COMPLETED' : 'PEND',
+            transaction_code: isVipEntry ? `VIP_PASS_${visit.id}_${Date.now()}` : null,
             checkoutID: `PV_${visit.id}_${Date.now()}`,
             Transaction_timestamp: visit.visit_timestamp,
             payment_timestamp: visit.visit_timestamp // Initialize with visit timestamp, will be updated on payment confirmation
@@ -284,55 +294,127 @@ router.post('/api/vehicle/exit', async (req, res) => {
     const { vehicle_number, ticket_id } = req.body;
     const exit_timestamp = new Date();
 
+
     try {
-        if (!ticket_id) {
+        const normalizedVehicleNumber =
+            typeof vehicle_number === 'string' && vehicle_number.trim()
+                ? vehicle_number.trim().toUpperCase()
+                : '';
+        const ticketIdStr = ticket_id === undefined || ticket_id === null
+            ? ''
+            : String(ticket_id).trim();
+
+        if (!ticketIdStr && !normalizedVehicleNumber) {
             return res.status(400).json({
                 status: {
-                 faultcode: "-1",
+                    faultcode: "-1",
                     message: "Vehicle exit not successful",
-                    detail: "ticket_id is required."
+                    detail: "ticket_id or vehicle_number is required."
                 }
             });
         }
 
-        const visitWhere = { ticket_id: ticket_id, status: '1' };
-        if (vehicle_number) {
-            visitWhere.vehicle_number = vehicle_number;
-        }
+        let visit;
 
-        const visit = await Visits.findOne({
-            where: visitWhere,
-            order: [['visit_timestamp', 'DESC']]
-        });
-
-        if (!visit) {
-            const historicalWhere = { ticket_id: ticket_id };
-            if (vehicle_number) {
-                historicalWhere.vehicle_number = vehicle_number;
+        if (ticketIdStr) {
+            const visitWhere = { ticket_id: ticketIdStr, status: '1' };
+            if (normalizedVehicleNumber) {
+                visitWhere.vehicle_number = normalizedVehicleNumber;
             }
 
-            const historicalVisit = await Visits.findOne({
-                where: historicalWhere,
+            visit = await Visits.findOne({
+                where: visitWhere,
                 order: [['visit_timestamp', 'DESC']]
             });
 
-            if (historicalVisit) {
+            if (!visit) {
+                const historicalWhere = { ticket_id: ticketIdStr };
+                if (normalizedVehicleNumber) {
+                    historicalWhere.vehicle_number = normalizedVehicleNumber;
+                }
+
+                const historicalVisit = await Visits.findOne({
+                    where: historicalWhere,
+                    order: [['visit_timestamp', 'DESC']]
+                });
+
+                if (historicalVisit) {
+                    return res.status(400).json({
+                        status: {
+                            faultcode: "-1",
+                            message: "Vehicle exit not successful",
+                            detail: "ticket expired"
+                        }
+                    });
+                }
+
+                return res.status(404).json({
+                    status: {
+                        faultcode: "-1",
+                        message: "Vehicle exit not successful",
+                        detail: "Vehicle not found in the system."
+                    }
+                });
+            }
+        } else {
+            const vipByPlate = await VIP.findOne({ where: { vehicle_number: normalizedVehicleNumber, vip_status: 1 } });
+
+            if (!vipByPlate) {
                 return res.status(400).json({
                     status: {
                         faultcode: "-1",
                         message: "Vehicle exit not successful",
-                        detail: "ticket expired"
+                        detail: "ticket_id is required for non-VIP vehicles."
                     }
                 });
             }
 
-            return res.status(404).json({
-                status: {
-                    faultcode: "-1",
-                    message: "Vehicle exit not successful",
-                    detail: "Vehicle not found in the system."
-                }
+            visit = await Visits.findOne({
+                where: { vehicle_number: normalizedVehicleNumber, status: '1' },
+                order: [['visit_timestamp', 'DESC']]
             });
+
+            if (!visit) {
+                return res.status(404).json({
+                    status: {
+                        faultcode: "-1",
+                        message: "Vehicle exit not successful",
+                        detail: "Active VIP visit not found."
+                    }
+                });
+            }
+        }
+
+        const vipVehicleNumber = normalizedVehicleNumber || (visit.vehicle_number || '');
+        const isVip = vipVehicleNumber
+            ? await VIP.findOne({ where: { vehicle_number: vipVehicleNumber, vip_status: 1 } })
+            : null;
+
+        // Active VIP exits immediately without further payment checks.
+        if (isVip) {
+            const vipTransaction = await Transaction.findOne({
+                where: { visit_id: visit.id },
+                order: [['createdAt', 'DESC']]
+            });
+
+            const durationMs = exit_timestamp - visit.visit_timestamp;
+            const durationHours = Math.ceil(durationMs / (1000 * 60 * 60));
+
+            visit.exit_timestamp = exit_timestamp;
+            visit.hours = durationHours;
+            visit.amount = 0;
+            visit.status = '0';
+            visit.paid_status = '0';
+            await visit.save();
+
+            if (vipTransaction && vipTransaction.status !== 'COMPLETED') {
+                vipTransaction.amount = 0;
+                vipTransaction.status = 'COMPLETED';
+                vipTransaction.payment_timestamp = exit_timestamp;
+                await vipTransaction.save();
+            }
+
+            return res.json(visit);
         }
 
         //pull transaction record for this visit
@@ -434,6 +516,63 @@ router.post('/api/vehicle/exit', async (req, res) => {
     }
 });
 
+//change visit status to paid for manual cash payments
+router.post('/visits/manual', AuthenticateToken, async (req, res) => {
+    const ticket_id = req.body.ticket_id;
+    const manual_pay = req.body.manual_pay;
+    const paymentTimestamp = new Date();
+
+    // Normalize numeric and string ticket IDs to a safe comparable value.
+    const ticketIdStr = ticket_id === undefined || ticket_id === null
+        ? ''
+        : String(ticket_id).trim();
+
+    if (!ticketIdStr) {
+        return res.status(400).json({ error: "ticket_id is required" });
+    }
+
+    if (!manual_pay) {
+        return res.status(400).json({ error: "manual_pay must be true" });
+    }
+
+    //if manual_pay is true, mark as aid and update everything as if it was paid via mpesa to allow vehicle to exit when called via /exit
+    try {
+        const visit = await Visits.findOne({
+            where: { ticket_id: ticketIdStr, status: '1' },
+            order: [['visit_timestamp', 'DESC']]
+        });
+
+        if (!visit) {
+            return res.status(404).json({ error: "Visit not found" });
+        }
+
+        const transaction = await Transaction.findOne({
+            where: { visit_id: visit.id },
+            order: [['createdAt', 'DESC']]
+        });
+
+        if (!transaction) {
+            return res.status(404).json({ error: "Transaction not found for this visit" });
+        }
+
+        visit.paid_status = '0';
+        await visit.save();
+
+        transaction.status = 'COMPLETED';
+        transaction.transaction_code = `MANUAL_PAY_${visit.ticket_id}_${transaction.id}`;
+        transaction.payment_timestamp = paymentTimestamp;
+        await transaction.save();
+
+        res.json({
+            message: "Visit payment status updated successfully",
+            visit,
+            transaction
+        });
+    } catch (error) {
+        console.log("Error updating visit payment status:", error);
+        res.status(500).json({ error: "Failed to update visit payment status" });
+    }
+});
 
 
 

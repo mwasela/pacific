@@ -45,21 +45,28 @@ const Transaction = sequelize.define('Transaction', {
         allowNull: true // Will be set when payment is confirmed
     }
 }, {
-    timestamps: true
+    timestamps: true,
+    indexes: [
+        {
+            name: 'idx_transactions_createdat_id',
+            fields: ['createdAt', 'id']
+        },
+        {
+            name: 'idx_transactions_trx_timestamp_id',
+            fields: ['Transaction_timestamp', 'id']
+        },
+        {
+            name: 'idx_transactions_status_createdat_id',
+            fields: ['status', 'createdAt', 'id']
+        },
+        {
+            name: 'idx_transactions_visit_id',
+            fields: ['visit_id']
+        }
+    ]
 });
 
 //A transaction belongs to a visit
 Transaction.belongsTo(Visits, { foreignKey: 'visit_id' });
-
-
-sequelize.sync({
-    // force: true // Use with caution - this will drop the table if it already exists
-    // alter: true // Use this in development to update the table structure without dropping it
-}).then(() => {
-    console.log("Transaction table synced successfully.");
-}).catch(err => {
-    console.error("Failed to sync Transaction table:", err);        
-
-})
 
 module.exports = Transaction;
