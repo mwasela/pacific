@@ -25,7 +25,7 @@ const shortCode = process.env.MPESA_SHORTCODE;
 const passkey = process.env.MPESA_PASSKEY;
 
 
-
+//fix
 const CHARGE_CRON_INTERVAL_MS = 60 * 1000;
 let pendingChargesCronHandle = null;
 
