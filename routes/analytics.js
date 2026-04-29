@@ -157,4 +157,87 @@ router.get('/transactions-series', authenticateToken, async (req, res) => {
     }
 });
 
+//
+
+// additional route to show revenue, with time range filter, so amount returned would be the sum of all transactions in the time range, will recieve from and to from frontend query params
+router.get('/revenue', authenticateToken, async (req, res) => {
+    try {
+        const paidStatusRaw = typeof req.query.paid_status === 'string' ? req.query.paid_status.trim() : undefined;
+        const freeVisitRaw = typeof req.query.free_visit === 'string' ? req.query.free_visit.trim() : undefined;
+        const numberPlateQuery = typeof req.query.number_plate === 'string' ? req.query.number_plate.trim() : '';
+
+        if (typeof paidStatusRaw !== 'undefined' && paidStatusRaw !== '0' && paidStatusRaw !== '1') {
+            return res.status(400).json({ error: 'Invalid paid_status. Use 0 or 1' });
+        }
+
+        if (typeof freeVisitRaw !== 'undefined' && freeVisitRaw !== '0' && freeVisitRaw !== '1') {
+            return res.status(400).json({ error: 'Invalid free_visit. Use 0 or 1' });
+        }
+
+        const transactionWhere = parseDateRange(req);
+
+        if (numberPlateQuery && numberPlateQuery.length > 0) {
+            transactionWhere.number_plate = {
+                [Op.like]: `%${numberPlateQuery}%`
+            };
+        }
+
+        let visitWhere;
+        if (typeof paidStatusRaw !== 'undefined' || typeof freeVisitRaw !== 'undefined') {
+            const visitAndFilters = [];
+
+            if (typeof paidStatusRaw !== 'undefined') {
+                visitAndFilters.push({ paid_status: Number(paidStatusRaw) });
+            }
+
+            if (typeof freeVisitRaw !== 'undefined') {
+                visitAndFilters.push(
+                    freeVisitRaw === '0'
+                        ? { amount: { [Op.eq]: 0 } }
+                        : { amount: { [Op.gt]: 0 } }
+                );
+            }
+
+            visitWhere = visitAndFilters.length > 1
+                ? { [Op.and]: visitAndFilters }
+                : visitAndFilters[0];
+        }
+
+        const queryOptions = {
+            where: transactionWhere,
+            ...(visitWhere
+                ? {
+                    include: [
+                        {
+                            model: Visits,
+                            attributes: [],
+                            where: visitWhere,
+                            required: true
+                        }
+                    ]
+                }
+                : {})
+        };
+
+        const [totalRevenue, uniquePlates] = await Promise.all([
+            Transaction.sum('Transaction.amount', queryOptions),
+            Transaction.count({
+                ...queryOptions,
+                distinct: true,
+                col: 'number_plate'
+            })
+        ]);
+
+        res.json({
+            total_revenue: Number(totalRevenue || 0),
+            unique_number_plates: uniquePlates,
+            number_plate_total_amount: numberPlateQuery ? Number(totalRevenue || 0) : null
+        });
+    }
+    catch (error) {
+        console.error('Error fetching revenue analytics:', error);
+        res.status(500).json({ error: 'Failed to fetch revenue analytics' });
+    }
+});
+
 module.exports = router;
