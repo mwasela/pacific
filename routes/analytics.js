@@ -157,8 +157,6 @@ router.get('/transactions-series', authenticateToken, async (req, res) => {
     }
 });
 
-//
-
 // additional route to show revenue, with time range filter, so amount returned would be the sum of all transactions in the time range, will recieve from and to from frontend query params
 router.get('/revenue', authenticateToken, async (req, res) => {
     try {
