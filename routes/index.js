@@ -14,7 +14,7 @@ const AuthenticateToken = require('../middleware/auth');
 
 dotenv.config();
 
-const PAID_EXIT_GRACE_MINUTES = 30;
+const PAID_EXIT_GRACE_MINUTES = 20;
 const NAIROBI_UTC_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const FREE_MINUTES = 30;
@@ -72,6 +72,54 @@ const calculateChargeFromTimestamp = (startTimestamp, endTimestamp = new Date())
         amount,
         elapsedMinutes,
         elapsedHours
+    };
+};
+
+const calculatePostValidationOverstayCharge = (paymentTimestamp, endTimestamp = new Date()) => {
+    const paidAt = new Date(paymentTimestamp);
+    const endTime = new Date(endTimestamp);
+
+    if (Number.isNaN(paidAt.getTime())) {
+        return {
+            amount: 0,
+            elapsedMinutes: 0,
+            elapsedHours: 0,
+            withinGrace: true
+        };
+    }
+
+    const graceEndsAt = new Date(paidAt.getTime() + (PAID_EXIT_GRACE_MINUTES * 60 * 1000));
+    const overstayMs = endTime.getTime() - graceEndsAt.getTime();
+
+    if (overstayMs <= 0) {
+        return {
+            amount: 0,
+            elapsedMinutes: 0,
+            elapsedHours: 0,
+            withinGrace: true
+        };
+    }
+
+    // Once grace expires, billing starts immediately (no additional free window).
+    const elapsedMinutes = Math.max(0, Math.ceil(overstayMs / (1000 * 60)));
+    const elapsedHours = Math.max(0, Math.ceil(elapsedMinutes / 60));
+
+    let amount;
+    if (elapsedMinutes <= FIRST_HOUR_MINUTES) {
+        amount = FIRST_HOUR_RATE;
+    } else if (elapsedMinutes <= THIRD_HOUR_MINUTES) {
+        amount = THIRD_HOUR_RATE;
+    } else {
+        const extraHours = Math.ceil((elapsedMinutes - THIRD_HOUR_MINUTES) / 60);
+        amount = THIRD_HOUR_RATE + (extraHours * EXTRA_HOURLY_RATE);
+        amount = Math.min(amount, DAYTIME_CAP);
+    }
+
+    return {
+        amount,
+        elapsedMinutes,
+        elapsedHours,
+        withinGrace: false
     };
 };
 
@@ -442,38 +490,34 @@ router.post('/api/vehicle/exit', async (req, res) => {
             });
         }
 
-        if (!isFreeExit && transaction.status === 'COMPLETED') {
+        if (transaction.status === 'COMPLETED') {
             const paymentReference = transaction.payment_timestamp || transaction.Transaction_timestamp;
 
             if (paymentReference) {
-                const paidElapsedMinutes = Math.floor((exit_timestamp.getTime() - new Date(paymentReference).getTime()) / (1000 * 60));
+                const overstayCharge = calculatePostValidationOverstayCharge(paymentReference, exit_timestamp);
+                const amountDue = overstayCharge.amount;
 
-                if (paidElapsedMinutes > PAID_EXIT_GRACE_MINUTES) {
-                    const overstayCharge = calculateChargeFromTimestamp(paymentReference, exit_timestamp);
-                    const amountDue = overstayCharge.amount;
+                if (amountDue > 0) {
+                    visit.amount = amountDue;
+                    visit.hours = overstayCharge.elapsedHours < 1 ? 1 : overstayCharge.elapsedHours;
+                    visit.paid_status = '1';
+                    await visit.save();
 
-                    if (amountDue > 0) {
-                        visit.amount = amountDue;
-                        visit.hours = overstayCharge.elapsedHours < 1 ? 1 : overstayCharge.elapsedHours;
-                        visit.paid_status = '1';
-                        await visit.save();
+                    transaction.amount = amountDue;
+                    transaction.status = 'PEND';
+                    transaction.transaction_code = null;
+                    transaction.payment_timestamp = null;
+                    await transaction.save();
 
-                        transaction.amount = amountDue;
-                        transaction.status = 'PEND';
-                        transaction.transaction_code = null;
-                        transaction.payment_timestamp = null;
-                        await transaction.save();
-
-                        return res.status(400).json({
-                            status: {
-                                faultcode: "-1",
-                                message: "Vehicle exit not successful",
-                                detail: "Additional payment required. Ticket exceeded 30-minute paid grace period.",
-                                ticket_id: visit.ticket_id,
-                                amount_due: amountDue
-                            }
-                        });
-                    }
+                    return res.status(400).json({
+                        status: {
+                            faultcode: "-1",
+                            message: "Vehicle exit not successful",
+                            detail: "Additional payment required. Ticket exceeded 20-minute validation grace period.",
+                            ticket_id: visit.ticket_id,
+                            amount_due: amountDue
+                        }
+                    });
                 }
             }
         }
