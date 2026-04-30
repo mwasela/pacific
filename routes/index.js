@@ -494,12 +494,30 @@ router.post('/api/vehicle/exit', async (req, res) => {
             const paymentReference = transaction.payment_timestamp || transaction.Transaction_timestamp;
 
             if (paymentReference) {
-                const overstayCharge = calculatePostValidationOverstayCharge(paymentReference, exit_timestamp);
-                const amountDue = overstayCharge.amount;
+                const chargeAtValidation = calculateChargeFromTimestamp(visit.visit_timestamp, paymentReference);
+                const validatedWithinFreeWindow = chargeAtValidation.elapsedMinutes <= FREE_MINUTES;
+                const paidAmount = Number(transaction.amount) || 0;
+
+                let amountDue = 0;
+                let dueHours = 0;
+                let dueMessage = '';
+
+                if (validatedWithinFreeWindow) {
+                    const overstayCharge = calculatePostValidationOverstayCharge(paymentReference, exit_timestamp);
+                    amountDue = overstayCharge.amount;
+                    dueHours = overstayCharge.elapsedHours;
+                    dueMessage = "Additional payment required. Ticket exceeded 20-minute validation grace period.";
+                } else {
+                    // Validation happened after free window; no grace applies.
+                    const currentCharge = calculateChargeFromTimestamp(visit.visit_timestamp, exit_timestamp);
+                    amountDue = Math.max(0, currentCharge.amount - paidAmount);
+                    dueHours = currentCharge.elapsedHours;
+                    dueMessage = "Additional payment required. Ticket was validated after 30-minute free window, so grace period is not applicable.";
+                }
 
                 if (amountDue > 0) {
                     visit.amount = amountDue;
-                    visit.hours = overstayCharge.elapsedHours < 1 ? 1 : overstayCharge.elapsedHours;
+                    visit.hours = dueHours < 1 ? 1 : dueHours;
                     visit.paid_status = '1';
                     await visit.save();
 
@@ -513,7 +531,7 @@ router.post('/api/vehicle/exit', async (req, res) => {
                         status: {
                             faultcode: "-1",
                             message: "Vehicle exit not successful",
-                            detail: "Additional payment required. Ticket exceeded 20-minute validation grace period.",
+                            detail: dueMessage,
                             ticket_id: visit.ticket_id,
                             amount_due: amountDue
                         }
