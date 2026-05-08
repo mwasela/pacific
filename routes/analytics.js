@@ -22,6 +22,7 @@ const parseDateRange = (req) => {
         if (to) {
             const toDate = new Date(to);
             if (!Number.isNaN(toDate.getTime())) {
+                toDate.setHours(23, 59, 59, 999);
                 where[Op.and].push({ Transaction_timestamp: { [Op.lte]: toDate } });
             }
         }
@@ -51,6 +52,7 @@ const parseVisitDateRange = (req) => {
         if (to) {
             const toDate = new Date(to);
             if (!Number.isNaN(toDate.getTime())) {
+                toDate.setHours(23, 59, 59, 999);
                 where[Op.and].push({ visit_timestamp: { [Op.lte]: toDate } });
             }
         }

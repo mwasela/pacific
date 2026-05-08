@@ -169,7 +169,7 @@ router.post('/mpesa/callback/vip', async (req, res) => {
 
             transaction.status = 'COMPLETED';
             transaction.transaction_code = mpesaReceipt;
-            transaction.Transaction_timestamp = new Date(formattedDate);
+            transaction.payment_timestamp = new Date(formattedDate);
             await transaction.save();
 
 
@@ -231,7 +231,6 @@ router.post('/mpesa/callback', async (req, res) => {
             // Update record
             transaction.status = 'COMPLETED';
             transaction.transaction_code = mpesaReceipt;
-            transaction.Transaction_timestamp = new Date(formattedDate);
             transaction.payment_timestamp = new Date(formattedDate);
             await transaction.save();
 

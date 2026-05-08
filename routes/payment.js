@@ -428,9 +428,8 @@ router.post('/pay', getAccessToken, async (req, res) => {
             }
         );
 
-        // 8. Update record with actual Safaricom CheckoutRequestID and tranasaction time
+        // 8. Update record with actual Safaricom CheckoutRequestID
         transaction.checkoutID = stkResponse.data.CheckoutRequestID;
-        transaction.Transaction_timestamp = nairobiDate; // Use the same timestamp as the password generation time
         await transaction.save();
 
         res.status(200).json({
@@ -554,9 +553,8 @@ router.post('/unpaid/stk', getAccessToken, async (req, res) => {
         // (You can refactor the STK push logic into a separate function to avoid duplication)
         const stkPushResponse = await initializeStk(visit.amount, phone_number, timestamp);
 
-        // Update transaction with new checkoutID and timestamp
+        // Update transaction with new checkoutID
         transaction.checkoutID = stkPushResponse.CheckoutRequestID;
-        transaction.Transaction_timestamp = nairobiDate;
         await transaction.save();
 
         res.json({ message: "STK Push triggered for unpaid visit." });

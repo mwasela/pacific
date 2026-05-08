@@ -203,6 +203,8 @@ router.get('/transactions/range', AuthenticateToken, async (req, res) => {
             if (Number.isNaN(toDate.getTime())) {
                 return res.status(400).json({ error: 'Invalid to date' });
             }
+            // Extend to end of day so date-only inputs include the full day
+            toDate.setHours(23, 59, 59, 999);
         }
 
         if (fromDate && toDate && fromDate > toDate) {
@@ -266,10 +268,38 @@ router.get('/transactions/range', AuthenticateToken, async (req, res) => {
                 };
         }
 
+        let visitStatusWhere;
+        const visitStatusRaw = typeof req.query.visit_status === 'string' ? req.query.visit_status.trim() : undefined;
+        if (typeof visitStatusRaw !== 'undefined') {
+            if (visitStatusRaw !== '0' && visitStatusRaw !== '1') {
+                return res.status(400).json({ error: 'Invalid visit_status. Use 0 (completed) or 1 (open)' });
+            }
+
+            visitStatusWhere = {
+                status: visitStatusRaw
+            };
+        }
+
         let visitWhere;
-        if (visitDateWhere && paidStatusWhere && freeVisitWhere) {
+        if (visitDateWhere && paidStatusWhere && freeVisitWhere && visitStatusWhere) {
+            visitWhere = {
+                [Op.and]: [visitDateWhere, paidStatusWhere, freeVisitWhere, visitStatusWhere]
+            };
+        } else if (visitDateWhere && paidStatusWhere && freeVisitWhere) {
             visitWhere = {
                 [Op.and]: [visitDateWhere, paidStatusWhere, freeVisitWhere]
+            };
+        } else if (visitDateWhere && paidStatusWhere && visitStatusWhere) {
+            visitWhere = {
+                [Op.and]: [visitDateWhere, paidStatusWhere, visitStatusWhere]
+            };
+        } else if (visitDateWhere && freeVisitWhere && visitStatusWhere) {
+            visitWhere = {
+                [Op.and]: [visitDateWhere, freeVisitWhere, visitStatusWhere]
+            };
+        } else if (paidStatusWhere && freeVisitWhere && visitStatusWhere) {
+            visitWhere = {
+                [Op.and]: [paidStatusWhere, freeVisitWhere, visitStatusWhere]
             };
         } else if (visitDateWhere && paidStatusWhere) {
             visitWhere = {
@@ -279,12 +309,24 @@ router.get('/transactions/range', AuthenticateToken, async (req, res) => {
             visitWhere = {
                 [Op.and]: [visitDateWhere, freeVisitWhere]
             };
+        } else if (visitDateWhere && visitStatusWhere) {
+            visitWhere = {
+                [Op.and]: [visitDateWhere, visitStatusWhere]
+            };
         } else if (paidStatusWhere && freeVisitWhere) {
             visitWhere = {
                 [Op.and]: [paidStatusWhere, freeVisitWhere]
             };
+        } else if (paidStatusWhere && visitStatusWhere) {
+            visitWhere = {
+                [Op.and]: [paidStatusWhere, visitStatusWhere]
+            };
+        } else if (freeVisitWhere && visitStatusWhere) {
+            visitWhere = {
+                [Op.and]: [freeVisitWhere, visitStatusWhere]
+            };
         } else {
-            visitWhere = visitDateWhere || paidStatusWhere || freeVisitWhere;
+            visitWhere = visitDateWhere || paidStatusWhere || freeVisitWhere || visitStatusWhere;
         }
 
         const hasLimitParam = typeof req.query.limit !== 'undefined';
@@ -359,6 +401,21 @@ router.get('/transactions/range', AuthenticateToken, async (req, res) => {
             where = where
                 ? { [Op.and]: [where, numberPlateFilter] }
                 : numberPlateFilter;
+        }
+
+        const manualPayRaw = typeof req.query.manual_pay === 'string' ? req.query.manual_pay.trim() : undefined;
+        if (typeof manualPayRaw !== 'undefined') {
+            if (manualPayRaw !== '0' && manualPayRaw !== '1') {
+                return res.status(400).json({ error: 'Invalid manual_pay. Use 0 or 1' });
+            }
+
+            const manualPayFilter = manualPayRaw === '1'
+                ? { transaction_code: { [Op.like]: 'MANUAL_PAY_%' } }
+                : { transaction_code: { [Op.notLike]: 'MANUAL_PAY_%' } };
+
+            where = where
+                ? { [Op.and]: [where, manualPayFilter] }
+                : manualPayFilter;
         }
 
         const queryOptions = {
