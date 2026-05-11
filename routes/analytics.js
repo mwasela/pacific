@@ -258,12 +258,16 @@ router.get('/revenue', authenticateToken, async (req, res) => {
                 : {})
         };
 
-        const [totalRevenue, uniquePlates, openVisitRecords, completedVisitRecords] = await Promise.all([
+        const [totalRevenue, uniquePlates, rawVisitRecords, openVisitRecords, completedVisitRecords] = await Promise.all([
             Transaction.sum('Transaction.amount', queryOptions),
             Transaction.count({
                 ...queryOptions,
                 distinct: true,
                 col: 'number_plate'
+            }),
+            Transaction.count({
+                ...queryOptions,
+                col: 'id'
             }),
             Transaction.count({
                 where: transactionWhere,
@@ -297,6 +301,7 @@ router.get('/revenue', authenticateToken, async (req, res) => {
             total_revenue: Number(totalRevenue || 0),
             unique_number_plates: uniquePlates,
             number_plate_total_amount: numberPlateQuery ? Number(totalRevenue || 0) : null,
+            raw_visit_records: rawVisitRecords,
             open_visit_records: openVisitRecords,
             completed_visit_records: completedVisitRecords
         });
