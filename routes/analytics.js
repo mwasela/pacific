@@ -164,7 +164,11 @@ router.get('/revenue', authenticateToken, async (req, res) => {
     try {
         const paidStatusRaw = typeof req.query.paid_status === 'string' ? req.query.paid_status.trim() : undefined;
         const freeVisitRaw = typeof req.query.free_visit === 'string' ? req.query.free_visit.trim() : undefined;
+        const manualPayRaw = typeof req.query.manual_pay === 'string' ? req.query.manual_pay.trim() : undefined;
+        const visitStatusRaw = typeof req.query.visit_status === 'string' ? req.query.visit_status.trim() : undefined;
         const numberPlateQuery = typeof req.query.number_plate === 'string' ? req.query.number_plate.trim() : '';
+        
+        
 
         if (typeof paidStatusRaw !== 'undefined' && paidStatusRaw !== '0' && paidStatusRaw !== '1') {
             return res.status(400).json({ error: 'Invalid paid_status. Use 0 or 1' });
@@ -174,17 +178,39 @@ router.get('/revenue', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Invalid free_visit. Use 0 or 1' });
         }
 
-        const transactionWhere = parseDateRange(req);
-
-        if (numberPlateQuery && numberPlateQuery.length > 0) {
-            transactionWhere.number_plate = {
-                [Op.like]: `%${numberPlateQuery}%`
-            };
+        if (typeof manualPayRaw !== 'undefined' && manualPayRaw !== '0' && manualPayRaw !== '1') {
+            return res.status(400).json({ error: 'Invalid manual_pay. Use 0 or 1' });
         }
 
-        let visitWhere;
-        if (typeof paidStatusRaw !== 'undefined' || typeof freeVisitRaw !== 'undefined') {
-            const visitAndFilters = [];
+        if (typeof visitStatusRaw !== 'undefined' && visitStatusRaw !== '0' && visitStatusRaw !== '1') {
+            return res.status(400).json({ error: 'Invalid visit_status. Use 0 or 1' });
+        }
+
+        const dateRangeWhere = parseDateRange(req);
+        const transactionFilters = dateRangeWhere[Op.and] ? [...dateRangeWhere[Op.and]] : [];
+
+        if (numberPlateQuery && numberPlateQuery.length > 0) {
+            transactionFilters.push({
+                number_plate: {
+                    [Op.like]: `%${numberPlateQuery}%`
+                }
+            });
+        }
+        if (typeof manualPayRaw !== 'undefined') {
+            transactionFilters.push(
+                manualPayRaw === '1'
+                    ? { transaction_code: { [Op.like]: 'MANUAL_PAY_%' } }
+                    : { transaction_code: { [Op.notLike]: 'MANUAL_PAY_%' } }
+            );
+        }
+
+        const transactionWhere = transactionFilters.length > 0
+            ? { [Op.and]: transactionFilters }
+            : {};
+
+        const visitAndFilters = [];
+
+        if (typeof paidStatusRaw !== 'undefined' || typeof freeVisitRaw !== 'undefined' || typeof visitStatusRaw !== 'undefined') {
 
             if (typeof paidStatusRaw !== 'undefined') {
                 visitAndFilters.push({ paid_status: Number(paidStatusRaw) });
@@ -198,10 +224,23 @@ router.get('/revenue', authenticateToken, async (req, res) => {
                 );
             }
 
-            visitWhere = visitAndFilters.length > 1
-                ? { [Op.and]: visitAndFilters }
-                : visitAndFilters[0];
+            if (typeof visitStatusRaw !== 'undefined') {
+                visitAndFilters.push(
+                    visitStatusRaw === '1'
+                        ? { exit_timestamp: null }
+                        : { exit_timestamp: { [Op.ne]: null } }
+                );
+            }
+
         }
+
+        const visitWhere = visitAndFilters.length > 1
+            ? { [Op.and]: visitAndFilters }
+            : visitAndFilters[0];
+
+        const visitBaseWhere = visitAndFilters.filter((filter) => !Object.prototype.hasOwnProperty.call(filter, 'exit_timestamp'));
+        const openVisitsWhere = [...visitBaseWhere, { exit_timestamp: null }];
+        const completedVisitsWhere = [...visitBaseWhere, { exit_timestamp: { [Op.ne]: null } }];
 
         const queryOptions = {
             where: transactionWhere,
@@ -219,19 +258,47 @@ router.get('/revenue', authenticateToken, async (req, res) => {
                 : {})
         };
 
-        const [totalRevenue, uniquePlates] = await Promise.all([
+        const [totalRevenue, uniquePlates, openVisitRecords, completedVisitRecords] = await Promise.all([
             Transaction.sum('Transaction.amount', queryOptions),
             Transaction.count({
                 ...queryOptions,
                 distinct: true,
                 col: 'number_plate'
+            }),
+            Transaction.count({
+                where: transactionWhere,
+                distinct: true,
+                col: 'id',
+                include: [
+                    {
+                        model: Visits,
+                        attributes: [],
+                        where: openVisitsWhere.length > 1 ? { [Op.and]: openVisitsWhere } : openVisitsWhere[0],
+                        required: true
+                    }
+                ]
+            }),
+            Transaction.count({
+                where: transactionWhere,
+                distinct: true,
+                col: 'id',
+                include: [
+                    {
+                        model: Visits,
+                        attributes: [],
+                        where: completedVisitsWhere.length > 1 ? { [Op.and]: completedVisitsWhere } : completedVisitsWhere[0],
+                        required: true
+                    }
+                ]
             })
         ]);
 
         res.json({
             total_revenue: Number(totalRevenue || 0),
             unique_number_plates: uniquePlates,
-            number_plate_total_amount: numberPlateQuery ? Number(totalRevenue || 0) : null
+            number_plate_total_amount: numberPlateQuery ? Number(totalRevenue || 0) : null,
+            open_visit_records: openVisitRecords,
+            completed_visit_records: completedVisitRecords
         });
     }
     catch (error) {
