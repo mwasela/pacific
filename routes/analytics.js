@@ -5,6 +5,34 @@ const Transaction = require('../model/Transaction');
 const Visits = require('../model/Visits');
 const authenticateToken = require('../middleware/auth');
 
+const parseQueryDate = (value, endOfDay = false) => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const dateOnlyMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+        const year = Number(dateOnlyMatch[1]);
+        const month = Number(dateOnlyMatch[2]) - 1;
+        const day = Number(dateOnlyMatch[3]);
+        return endOfDay
+            ? new Date(year, month, day, 23, 59, 59, 999)
+            : new Date(year, month, day, 0, 0, 0, 0);
+    }
+
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+
+    return parsed;
+};
+
 const parseDateRange = (req) => {
     const { from, to } = req.query;
     const where = {};
@@ -13,16 +41,15 @@ const parseDateRange = (req) => {
         where[Op.and] = [];
 
         if (from) {
-            const fromDate = new Date(from);
-            if (!Number.isNaN(fromDate.getTime())) {
+            const fromDate = parseQueryDate(from);
+            if (fromDate) {
                 where[Op.and].push({ Transaction_timestamp: { [Op.gte]: fromDate } });
             }
         }
 
         if (to) {
-            const toDate = new Date(to);
-            if (!Number.isNaN(toDate.getTime())) {
-                toDate.setHours(23, 59, 59, 999);
+            const toDate = parseQueryDate(to, true);
+            if (toDate) {
                 where[Op.and].push({ Transaction_timestamp: { [Op.lte]: toDate } });
             }
         }
@@ -43,16 +70,15 @@ const parseVisitDateRange = (req) => {
         where[Op.and] = [];
 
         if (from) {
-            const fromDate = new Date(from);
-            if (!Number.isNaN(fromDate.getTime())) {
+            const fromDate = parseQueryDate(from);
+            if (fromDate) {
                 where[Op.and].push({ visit_timestamp: { [Op.gte]: fromDate } });
             }
         }
 
         if (to) {
-            const toDate = new Date(to);
-            if (!Number.isNaN(toDate.getTime())) {
-                toDate.setHours(23, 59, 59, 999);
+            const toDate = parseQueryDate(to, true);
+            if (toDate) {
                 where[Op.and].push({ visit_timestamp: { [Op.lte]: toDate } });
             }
         }
