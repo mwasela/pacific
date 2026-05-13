@@ -1,2 +1,4 @@
 Vehicle: KBC123A, Entry: Tue Mar 31 2026 20:16:15 GMT+0300 (East Africa Time), Exit: Tue Mar 31 2026 22:54:52 GMT+0300 (East Africa Time), Duration: 3 hours, Amount: 6
 Vehicle: KBC123D, Entry: Tue Mar 31 2026 23:20:12 GMT+0300 (East Africa Time), Exit: Tue Mar 31 2026 23:30:18 GMT+0300 (East Africa Time), Duration: 1 hours, Amount: 0
+Vehicle: KAA001, Entry: Wed May 13 2026 13:58:08 GMT+0300 (East Africa Time), Exit: Wed May 13 2026 14:01:40 GMT+0300 (East Africa Time), Duration: 1 hours, Amount: 0
+Vehicle: KAA002, Entry: Wed May 13 2026 13:59:58 GMT+0300 (East Africa Time), Exit: Wed May 13 2026 14:10:22 GMT+0300 (East Africa Time), Duration: 1 hours, Amount: 0

@@ -9,6 +9,7 @@ const Vippayments = require('../model/Vippayments');
 const { console } = require('inspector');
 const Visits = require('../model/Visits');
 const AuthenticateToken = require('../middleware/auth');
+const authenticateToken = require('../middleware/auth');
 
 
 
@@ -25,6 +26,23 @@ const THIRD_HOUR_RATE = 100;
 const EXTRA_HOURLY_RATE = 50;
 const DAYTIME_CAP = 600;
 const OVERNIGHT_BASE_RATE = 1000;
+
+const parseMpesaTransactionDate = (rawDateValue) => {
+    const raw = String(rawDateValue || '').trim();
+    if (!/^\d{14}$/.test(raw)) {
+        return null;
+    }
+
+    const year = Number(raw.substring(0, 4));
+    const monthIndex = Number(raw.substring(4, 6)) - 1;
+    const day = Number(raw.substring(6, 8));
+    const hour = Number(raw.substring(8, 10));
+    const minute = Number(raw.substring(10, 12));
+    const second = Number(raw.substring(12, 14));
+
+    // Safaricom timestamps are Nairobi local time (UTC+3), so convert to UTC instant.
+    return new Date(Date.UTC(year, monthIndex, day, hour - 3, minute, second));
+};
 
 const calculateChargeFromTimestamp = (startTimestamp, endTimestamp = new Date()) => {
     const startTime = new Date(startTimestamp);
@@ -157,8 +175,7 @@ router.post('/mpesa/callback/vip', async (req, res) => {
         const getValue = (name) => metadata.find(item => item.Name === name)?.Value;
         
         const mpesaReceipt = getValue('MpesaReceiptNumber');
-        const rawDate = getValue('TransactionDate').toString();
-        const formattedDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)} ${rawDate.substring(8, 10)}:${rawDate.substring(10, 12)}:${rawDate.substring(12, 14)}`;
+        const mpesaPaymentDate = parseMpesaTransactionDate(getValue('TransactionDate'));
         
         try {
             const transaction = await Vippayments.findOne({ where: { checkoutID } });
@@ -169,7 +186,7 @@ router.post('/mpesa/callback/vip', async (req, res) => {
 
             transaction.status = 'COMPLETED';
             transaction.transaction_code = mpesaReceipt;
-            transaction.payment_timestamp = new Date(formattedDate);
+            transaction.payment_timestamp = mpesaPaymentDate || new Date();
             await transaction.save();
 
 
@@ -215,10 +232,7 @@ router.post('/mpesa/callback', async (req, res) => {
         const getValue = (name) => metadata.find(item => item.Name === name)?.Value;
 
         const mpesaReceipt = getValue('MpesaReceiptNumber');
-        const rawDate = getValue('TransactionDate').toString(); // e.g., "20260327134642"
-
-        // Format the date: YYYY-MM-DD HH:mm:ss
-        const formattedDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)} ${rawDate.substring(8, 10)}:${rawDate.substring(10, 12)}:${rawDate.substring(12, 14)}`;
+        const mpesaPaymentDate = parseMpesaTransactionDate(getValue('TransactionDate'));
 
         try {
             const transaction = await Transaction.findOne({ where: { checkoutID } });
@@ -231,7 +245,7 @@ router.post('/mpesa/callback', async (req, res) => {
             // Update record
             transaction.status = 'COMPLETED';
             transaction.transaction_code = mpesaReceipt;
-            transaction.payment_timestamp = new Date(formattedDate);
+            transaction.payment_timestamp = mpesaPaymentDate || new Date();
             await transaction.save();
 
             console.log(`Transaction ${mpesaReceipt} saved for plate ${transaction.number_plate}`);
@@ -255,6 +269,98 @@ router.post('/mpesa/callback', async (req, res) => {
     }
 
     res.json({ ResultCode: 0, ResultDesc: "Accepted" });
+});
+
+
+router.post('/api/user/updatepaymenttime', authenticateToken, async (req, res) => {
+    const { ticket_id, visit_id } = req.body;
+    const now = new Date();
+
+    const ticketIdStr = ticket_id === undefined || ticket_id === null
+        ? ''
+        : String(ticket_id).trim();
+
+    if (!ticketIdStr && !visit_id) {
+        return res.status(400).json({ error: "ticket_id or visit_id is required" });
+    }
+
+    try {
+        const visitWhere = { status: '1' };
+        if (visit_id) {
+            visitWhere.id = visit_id;
+        } else {
+            visitWhere.ticket_id = ticketIdStr;
+        }
+
+        // Find active visit, then update financial state based on current charge.
+        const visit = await Visits.findOne({
+            where: visitWhere,
+            order: [['visit_timestamp', 'DESC']]
+        });
+
+        if (!visit) {
+            return res.status(404).json({ error: "Active visit not found" });
+        }
+
+        const transaction = await Transaction.findOne({ where: { visit_id: visit.id }, order: [['createdAt', 'DESC']] });
+        if (!transaction) {
+            return res.status(404).json({ error: "Transaction not found for this visit" });
+        }
+
+        const chargeAtValidation = calculateChargeFromTimestamp(visit.visit_timestamp, now);
+        const withinFreeWindow = chargeAtValidation.elapsedMinutes <= FREE_MINUTES;
+
+        if (withinFreeWindow) {
+            visit.amount = 0;
+            visit.hours = chargeAtValidation.elapsedHours < 1 ? 1 : chargeAtValidation.elapsedHours;
+            visit.paid_status = '0';
+            await visit.save();
+
+            transaction.amount = 0;
+            transaction.status = 'COMPLETED';
+            transaction.payment_timestamp = now;
+            if (!transaction.transaction_code) {
+                transaction.transaction_code = `FREE_EXIT_${visit.id}_${Date.now()}`;
+            }
+            await transaction.save();
+
+            return res.json({
+                message: "Ticket validated for free exit. Grace period started.",
+                within_free_window: true,
+                grace_minutes: PAID_EXIT_GRACE_MINUTES,
+                visit,
+                transaction
+            });
+        }
+
+        // Outside free window: compute required payment and keep transaction pending.
+        visit.amount = chargeAtValidation.amount;
+        visit.hours = chargeAtValidation.elapsedHours < 1 ? 1 : chargeAtValidation.elapsedHours;
+        visit.paid_status = chargeAtValidation.amount > 0 ? '1' : '0';
+        await visit.save();
+
+        transaction.amount = chargeAtValidation.amount;
+        transaction.status = chargeAtValidation.amount > 0 ? 'PEND' : 'COMPLETED';
+        if (chargeAtValidation.amount > 0) {
+            transaction.transaction_code = null;
+            transaction.payment_timestamp = null;
+        } else {
+            transaction.payment_timestamp = now;
+        }
+        await transaction.save();
+
+        return res.status(400).json({
+            message: "Ticket is outside free window. Payment required before exit.",
+            within_free_window: false,
+            amount_due: chargeAtValidation.amount,
+            elapsed_minutes: chargeAtValidation.elapsedMinutes,
+            visit,
+            transaction
+        });
+    } catch (error) {
+        console.error("Error updating payment timestamp:", error);
+        res.status(500).json({ error: "Failed to update payment timestamp" });
+    }
 });
 
 
@@ -290,7 +396,7 @@ router.post('/api/vehicle/entry', async (req, res) => {
             ticket_id: resolvedTicketId,
             paid_status: isVipEntry ? '0' : '1',
             visit_timestamp: visit_timestamp,
-            amount: isVipEntry ? 0 : 5,
+            amount: isVipEntry ? 0 : 0, // VIP entries start with 0 amount, will be updated on exit if needed
             hours: 1,
             status: '1',
             user_type: isVipEntry ? 2 : 0
