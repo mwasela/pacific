@@ -684,7 +684,7 @@ router.post('/api/vehicle/exit', async (req, res) => {
 });
 
 //change visit status to paid for manual cash payments
-router.post('/visits/manual', AuthenticateToken, async (req, res) => {
+router.post('/visits/manual', async (req, res) => {
     const ticket_id = req.body.ticket_id;
     const manual_pay = req.body.manual_pay;
     const paymentTimestamp = new Date();
