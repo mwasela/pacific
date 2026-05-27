@@ -705,7 +705,8 @@ router.post('/visits/manual', async (req, res) => {
     //if manual_pay is true, mark as aid and update everything as if it was paid via mpesa to allow vehicle to exit when called via /exit
     try {
         const visit = await Visits.findOne({
-            where: { ticket_id: ticketIdStr, status: '1' },
+            where: { ticket_id: ticketIdStr},
+                //status: 1 },
             order: [['visit_timestamp', 'DESC']]
         });
 
