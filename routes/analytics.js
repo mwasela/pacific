@@ -191,6 +191,7 @@ router.get('/revenue', authenticateToken, async (req, res) => {
         const paidStatusRaw = typeof req.query.paid_status === 'string' ? req.query.paid_status.trim() : undefined;
         const freeVisitRaw = typeof req.query.free_visit === 'string' ? req.query.free_visit.trim() : undefined;
         const manualPayRaw = typeof req.query.manual_pay === 'string' ? req.query.manual_pay.trim() : undefined;
+        const vipPayRaw = typeof req.query.vip_pay === 'string' ? req.query.vip_pay.trim() : undefined;
         const visitStatusRaw = typeof req.query.visit_status === 'string' ? req.query.visit_status.trim() : undefined;
         const numberPlateQuery = typeof req.query.number_plate === 'string' ? req.query.number_plate.trim() : '';
         
@@ -206,6 +207,10 @@ router.get('/revenue', authenticateToken, async (req, res) => {
 
         if (typeof manualPayRaw !== 'undefined' && manualPayRaw !== '0' && manualPayRaw !== '1') {
             return res.status(400).json({ error: 'Invalid manual_pay. Use 0 or 1' });
+        }
+
+        if (typeof vipPayRaw !== 'undefined' && vipPayRaw !== '0' && vipPayRaw !== '1') {
+            return res.status(400).json({ error: 'Invalid vip_pay. Use 0 or 1' });
         }
 
         if (typeof visitStatusRaw !== 'undefined' && visitStatusRaw !== '0' && visitStatusRaw !== '1') {
@@ -227,6 +232,14 @@ router.get('/revenue', authenticateToken, async (req, res) => {
                 manualPayRaw === '1'
                     ? { transaction_code: { [Op.like]: 'MANUAL_PAY_%' } }
                     : { transaction_code: { [Op.notLike]: 'MANUAL_PAY_%' } }
+            );
+        }
+
+        if (typeof vipPayRaw !== 'undefined') {
+            transactionFilters.push(
+                vipPayRaw === '1'
+                    ? { transaction_code: { [Op.like]: 'VIP%' } }
+                    : { transaction_code: { [Op.notLike]: 'VIP%' } }
             );
         }
 

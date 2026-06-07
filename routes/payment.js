@@ -11,6 +11,7 @@ const { Console } = require('console');
 const Vippayments = require('../model/Vippayments');
 const AuthenticateToken = require('../middleware/auth');
 const initializeStk = require('../services/stk_init');
+const Confee = require('../model/Confee');
 
 
 dotenv = require('dotenv');
@@ -372,13 +373,28 @@ router.post('/pay', getAccessToken, async (req, res) => {
         await transaction.save();
 
         const number_plate = transaction.number_plate;
-        const amount = transaction.amount;
+        let amount = transaction.amount;
 
+        //check if amount is 50 or less, add 5 kes as convenience fee if amount > 50 add 10 kes as convenience fee, then put an entry into Confee table.
+        let con_fee = 0;
+
+        if (amount <= 50) {
+            con_fee = 5;
+        } else {
+            con_fee = 10;
+        }
+
+        amount += con_fee;
+
+        await Confee.create({
+            visit_id: visit.id,
+            con_fee: con_fee,
+            status: 0
+        });
 
         // // // 3. M-Pesa Constants
         // const shortCode = process.env.MPESA_SHORTCODE;
         // const passkey = process.env.MPESA_PASSKEY;
-
 
         //if either shortcode or passkey is missing, return error
         if (!shortCode || !passkey) {
@@ -538,6 +554,23 @@ router.post('/unpaid/stk', getAccessToken, async (req, res) => {
             return res.status(404).json({ error: "No transaction found for this visit." });
         }
 
+        let amount = Number(visit.amount) || 0;
+        let con_fee = 0;
+
+        if (amount <= 50) {
+            con_fee = 5;
+        } else {
+            con_fee = 10;
+        }
+
+        amount += con_fee;
+
+        await Confee.create({
+            visit_id: visit.id,
+            con_fee: con_fee,
+            status: 0
+        });
+
 
         const now = new Date();
         const nairobiDate = new Date(now.getTime() + 3 * 60 * 60 * 1000); // UTC+3
@@ -551,7 +584,7 @@ router.post('/unpaid/stk', getAccessToken, async (req, res) => {
 
         // Initiate STK Push using the same logic as the /pay endpoint
         // (You can refactor the STK push logic into a separate function to avoid duplication)
-        const stkPushResponse = await initializeStk(visit.amount, phone_number, timestamp);
+    const stkPushResponse = await initializeStk(amount, phone_number, timestamp);
 
         // Update transaction with new checkoutID
         transaction.checkoutID = stkPushResponse.CheckoutRequestID;

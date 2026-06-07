@@ -10,6 +10,7 @@ const { console } = require('inspector');
 const Visits = require('../model/Visits');
 const AuthenticateToken = require('../middleware/auth');
 const authenticateToken = require('../middleware/auth');
+const Confee = require('../model/Confee');
 
 
 
@@ -240,6 +241,16 @@ router.post('/mpesa/callback', async (req, res) => {
             if (!transaction) {
                 console.error("Transaction not found for checkoutID:", checkoutID);
                 return res.status(404).json({ error: "Transaction not found" });
+            }
+
+            const confeeRecord = await Confee.findOne({ where: { visit_id: transaction.visit_id } });
+            
+            if (confeeRecord) {
+                confeeRecord.status = 1;
+                await confeeRecord.save();
+                console.log(`Confee record updated for visit_id ${transaction.visit_id}`);
+            } else {
+                console.error("Confee record not found for visit_id:", transaction.visit_id);
             }
 
             // Update record
