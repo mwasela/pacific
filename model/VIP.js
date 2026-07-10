@@ -3,6 +3,11 @@ const { DataTypes } = require('sequelize');
 
 
 const VIP = sequelizeInstance.define('VIP', {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true
+    },
     fname: {
         type: DataTypes.STRING,
         allowNull: false

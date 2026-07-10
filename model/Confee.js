@@ -3,6 +3,11 @@ const { DataTypes } = require('sequelize');
 const Visits = require('./Visits');
 
 const Confee = sequelizeInstance.define('Confee', {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true
+    },
     visit_id: {
         type: DataTypes.INTEGER,
         allowNull: false

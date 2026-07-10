@@ -351,4 +351,64 @@ router.get('/revenue', authenticateToken, async (req, res) => {
     }
 });
 
+//get a daily income report summary for a given specific date, if no date is provided, use today as default, 
+//when date is recieved, fix time start from midnight to 23:59:59 of that day, and return the total income for that day for transactions that have been completed, and also return the total number of transactions for that day, 
+//it should have the total amout for mpesa, total amount of manual payments, total amount of vip payments, and total amount of free visits, and also return the total number of unique number plates for that day, and also return the total number of paid completed visits for that day
+router.get('/daily-income', authenticateToken, async (req, res) => {
+
+    try {
+        const { date } = req.query;
+        let startDate, endDate;
+
+        if (date) {
+            const parsedDate = parseQueryDate(date);    
+            startDate = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate(), 0, 0, 0);
+            endDate = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate(), 23, 59, 59);
+        } else {
+            const today = new Date();
+            startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+            endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+        }
+
+        const dailyIncome = await Transaction.findAll({
+            where: {
+                Transaction_timestamp: {
+                    [Op.between]: [startDate, endDate]
+                }
+            },
+            attributes: [
+                [fn('SUM', col('amount')), 'total_income'],
+                [fn('COUNT', col('id')), 'total_transactions'],
+                [fn('SUM', literal(`CASE WHEN transaction_code LIKE 'MANUAL_PAY_%' THEN amount ELSE 0 END`)), 'total_manual_payments'],
+                [fn('SUM', literal(`CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN amount ELSE 0 END`)), 'total_mpesa_payments'], 
+                [fn('COUNT', literal(`DISTINCT CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN number_plate END`)), 'unique_number_plates'],
+            ],
+            raw: true
+        }); 
+
+        const totalPaidCompletedVisits = await Visits.count({
+            where: {
+                exit_timestamp: { [Op.ne]: null },
+                paid_status: '1',
+                visit_timestamp: {
+                    [Op.between]: [startDate, endDate]
+                }
+            }
+        });
+    
+        res.json({
+            date: startDate.toISOString().split('T')[0],
+            total_income: Number(dailyIncome[0].total_income || 0), 
+            total_transactions: Number(dailyIncome[0].total_transactions || 0),
+            total_manual_payments: Number(dailyIncome[0].total_manual_payments || 0),
+            total_mpesa_payments: Number(dailyIncome[0].total_mpesa_payments || 0),
+            total_paid_completed_visits: totalPaidCompletedVisits
+        }); 
+    } catch (error) {
+        console.error('Error fetching daily income report:', error);
+        res.status(500).json({ error: 'Failed to fetch daily income report' });
+    }
+});
+
+
 module.exports = router;

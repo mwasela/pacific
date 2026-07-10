@@ -11,6 +11,7 @@ const Visits = require('../model/Visits');
 const AuthenticateToken = require('../middleware/auth');
 const authenticateToken = require('../middleware/auth');
 const Confee = require('../model/Confee');
+const Viplogs = require('../model/Viplogs');
 
 
 
@@ -429,6 +430,15 @@ router.post('/api/vehicle/entry', async (req, res) => {
             // visit.message = "Welcome VIP!";
         }
 
+        //if isVip create Viplogs entry
+        if (isVipEntry) {
+            await Viplogs.create({
+                vip_id: activeVip.id,
+                number_plate: normalizedVehicleNumber,
+                action: 0 // 0 for entry
+            });
+        }
+
         //create a transaction record for this visit with status PENDING
         await Transaction.create({
             visit_id: visit.id,
@@ -577,6 +587,20 @@ router.post('/api/vehicle/exit', async (req, res) => {
                 vipTransaction.payment_timestamp = exit_timestamp;
                 await vipTransaction.save();
             }
+
+            //create Viplogs entry for exit
+            try {
+                await Viplogs.create({
+                    vip_id: isVip.id,
+                    number_plate: vipVehicleNumber,
+                    action: 1 // 1 for exit
+                });
+                console.log(`VIP exit log created for ${vipVehicleNumber}`);
+            } catch (viplogError) {
+                console.error(`Error creating VIP exit log for ${vipVehicleNumber}:`, viplogError.message);
+            }
+
+            console.log(`VIP vehicle exit recorded for ${vipVehicleNumber} at ${exit_timestamp}`);
 
             return res.json(visit);
         }

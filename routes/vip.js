@@ -75,6 +75,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
         phone_number,
         email,
         vehicle_number,
+        vip_expiry,
+        vip_status
     } = req.body;
 
     try {

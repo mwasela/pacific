@@ -13,7 +13,10 @@ const transactionsRouter = require('./routes/transactions');
 const analyticsRouter = require('./routes/analytics');
 const vipRouter = require('./routes/vip');
 const setupRouter = require('./routes/setup');
-const Vippayments = require('./routes/viptransactions');
+const VippaymentsRouter = require('./routes/viptransactions');
+const manualRouter = require('./routes/manual');
+const viplogsRouter = require('./routes/viplogs');
+const confeeRouter = require('./routes/confee');
 
 var app = express();
 
@@ -35,7 +38,10 @@ app.use('/transactions', transactionsRouter);
 app.use('/analytics', analyticsRouter);
 app.use('/vip', vipRouter);
 app.use('/setup', setupRouter);
-app.use('/vippayments', Vippayments);
+app.use('/vippayments', VippaymentsRouter);
+app.use('/manual', manualRouter);
+app.use('/viplogs', viplogsRouter);
+app.use('/confee', confeeRouter);
 
 
 if (typeof paymentRouter.startPendingChargesCron === 'function') {
