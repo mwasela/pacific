@@ -192,6 +192,9 @@ router.get('/transactions-series', authenticateToken, async (req, res) => {
         const { bucket = 'day' } = req.query;
         const transactionWhere = parseDateRange(req);
 
+        // Add COMPLETED status filter to exclude failed/pending transactions
+        transactionWhere.status = 'COMPLETED';
+
         const bucketFormats = {
             hour: '%Y-%m-%d %H:00:00',
             day: '%Y-%m-%d',
@@ -412,6 +415,10 @@ router.get('/revenue', authenticateToken, async (req, res) => {
         // 2. Build the unified filter array for the Visits model
         const visitFilters = [];
 
+        // Base filter: Only include closed visits (status = 0)
+        // This matches dashboard logic and ensures consistency across endpoints
+        visitFilters.push({ status: 0 });
+
         // INTEGRATED: Using your custom parseQueryDate helper function safely
         let { from, to } = req.query;
         if (from && to) {
@@ -450,7 +457,7 @@ router.get('/revenue', authenticateToken, async (req, res) => {
         // Set up separate base states for open and completed evaluations
         const baseWhereClause = visitFilters.length > 0 ? { [Op.and]: [...visitFilters] } : {};
 
-        // Inject active status constraints
+        // Inject visit status constraints (open/closed based on exit_timestamp)
         if (visitStatusRaw !== undefined) {
             visitFilters.push(visitStatusRaw === '1' ? { exit_timestamp: null } : { exit_timestamp: { [Op.ne]: null } });
         }
@@ -515,6 +522,7 @@ router.get('/daily-income', authenticateToken, async (req, res) => {
 
         const dailyIncome = await Transaction.findAll({
             where: {
+                status: 'COMPLETED',
                 Transaction_timestamp: {
                     [Op.between]: [startDate, endDate]
                 }
@@ -719,17 +727,22 @@ router.get('/summary', authenticateToken, async (req, res) => {
 
         const { startDate, endDate } = getPeriodDateRange(period);
 
-        // Base where clause for visits in the date range
-        const baseVisitWhere = {
+        // Base where clause for date range only (for counting all entries)
+        const dateRangeWhere = {
             visit_timestamp: {
                 [Op.between]: [startDate, endDate]
             }
         };
 
+        // Closed visits only (for revenue calculations)
+        const closedVisitsWhere = {
+            ...dateRangeWhere,
+            status: 0
+        };
+
         // Closed and paid visits (for collected revenue)
         const closedPaidWhere = {
-            ...baseVisitWhere,
-            status: 0,
+            ...closedVisitsWhere,
             paid_status: 0
         };
 
@@ -752,20 +765,21 @@ router.get('/summary', authenticateToken, async (req, res) => {
                 }
             }),
 
-            // Pending Exits (all visits still pending exit)
+            // Pending Exits (all visits still pending exit, any status)
             Visits.count({
                 where: {
-                    ...baseVisitWhere,
+                    ...dateRangeWhere,
                     exit_timestamp: null
                 }
             }),
 
-            // All Entries (all visits in period)
-            Visits.count({ where: baseVisitWhere }),
+            // All Entries (all visits in period, any status)
+            Visits.count({ where: dateRangeWhere }),
 
-            // Manual and Mpesa revenue/exits breakdown
+            // Manual and Mpesa revenue/exits breakdown (only COMPLETED transactions)
             Transaction.findAll({
                 where: {
+                    status: 'COMPLETED',
                     Transaction_timestamp: {
                         [Op.between]: [startDate, endDate]
                     }
@@ -793,7 +807,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
             pending_exits: Number(pendingExits || 0),
             all_entries: Number(allEntries || 0),
             manual_revenue: Number(transactionData.manual_revenue || 0),
-            mpesa_revenue: Number(collectedRevenue - transactionData.manual_revenue || 0),
+            mpesa_revenue: Number(transactionData.mpesa_revenue || 0),
             manual_exits: Number(transactionData.manual_exits || 0),
             mpesa_exits: Number(transactionData.mpesa_exits || 0)
         });
