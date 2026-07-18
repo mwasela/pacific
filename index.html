@@ -395,6 +395,12 @@
                         <span class="meta-value" id="transCodeText">--</span>
                     </div>
                 </div>
+
+                <div class="result-card" id="countdownCard" style="display: none; margin-top: 12px; text-align: center;">
+                    <div class="amount-label">Exit Time Remaining</div>
+                    <div class="amount-value" id="countdownDisplay" style="color: #00d4ff; font-size: 3rem; font-weight: 700; font-family: 'Courier New', monospace;">20:00</div>
+                    <p style="margin-top: 12px; opacity: 0.8;">Use this time to exit the parking area</p>
+                </div>
             </div>
 
             <p class="error-text" id="errorText"></p>
@@ -408,8 +414,10 @@
     <div id="toast">Barrier Opening... Drive Safe!</div>
 
     <script>
-        const API_BASE = 'https://test.eastafricanparking.com';
+        const API_BASE = 'https://api.eastafricanparking.com';
         let activeTicketId = null;
+        let countdownInterval = null;
+        let countdownTimeRemaining = 20 * 60; // 20 minutes in seconds
 
         function getTicketIdFromUrl() {
             const params = new URLSearchParams(window.location.search);
@@ -443,6 +451,58 @@
             } else {
                 button.textContent = button.getAttribute('data-default-text');
             }
+        }
+
+        function formatCountdown(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        }
+
+        function startCountdown(paymentTimestamp) {
+            // Clear any existing countdown
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+            }
+
+            // Validate and calculate remaining time based on payment timestamp
+            if (paymentTimestamp) {
+                const paymentTime = new Date(paymentTimestamp).getTime();
+                
+                // Check if date is valid
+                if (isNaN(paymentTime)) {
+                    console.error('Invalid payment_timestamp:', paymentTimestamp);
+                    countdownTimeRemaining = 20 * 60; // Fallback safely
+                } else {
+                    const currentTime = new Date().getTime();
+                    const elapsedMs = currentTime - paymentTime;
+                    const elapsedSeconds = Math.floor(elapsedMs / 1000);
+                    const totalGraceSeconds = 20 * 60; // 20 minutes
+                    countdownTimeRemaining = Math.max(0, totalGraceSeconds - elapsedSeconds);
+                }
+            } else {
+                console.warn('No payment_timestamp provided to startCountdown');
+                countdownTimeRemaining = 20 * 60; // Fallback to 20 minutes
+            }
+
+            document.getElementById('countdownCard').style.display = 'block';
+            document.getElementById('countdownDisplay').textContent = formatCountdown(countdownTimeRemaining);
+            document.getElementById('countdownDisplay').style.color = '#00d4ff';
+
+            countdownInterval = setInterval(() => {
+                countdownTimeRemaining--;
+
+                if (countdownTimeRemaining < 0) {
+                    countdownTimeRemaining = 0;
+                }
+
+                document.getElementById('countdownDisplay').textContent = formatCountdown(countdownTimeRemaining);
+
+                if (countdownTimeRemaining <= 0) {
+                    clearInterval(countdownInterval);
+                    document.getElementById('countdownDisplay').style.color = '#ff6b6b';
+                }
+            }, 1000);
         }
 
         function showLandingMode() {
@@ -594,6 +654,14 @@
 
                 if (String(data.paid_status || '').toUpperCase() === 'COMPLETED') {
                     showToast();
+                    // Only start countdown if payment_timestamp exists and is valid
+                    if (data.payment_timestamp) {
+                        startCountdown(data.payment_timestamp);
+                    } else {
+                        console.warn('Payment completed but no timestamp provided');
+                        // Fallback: still show countdown with default 20 minutes
+                        startCountdown(null);
+                    }
                 }
             } catch (error) {
                 console.error('Status error:', error);

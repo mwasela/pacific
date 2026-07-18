@@ -143,6 +143,99 @@ const calculatePostValidationOverstayCharge = (paymentTimestamp, endTimestamp = 
     };
 };
 
+
+router.post('/api/user/updatepaymenttime', authenticateToken, async (req, res) => {
+    const { ticket_id, visit_id } = req.body;
+    const now = new Date();
+
+    const ticketIdStr = ticket_id === undefined || ticket_id === null
+        ? ''
+        : String(ticket_id).trim();
+
+    if (!ticketIdStr && !visit_id) {
+        return res.status(400).json({ error: "ticket_id or visit_id is required" });
+    }
+
+    try {
+        const visitWhere = { status: '1' };
+        if (visit_id) {
+            visitWhere.id = visit_id;
+        } else {
+            visitWhere.ticket_id = ticketIdStr;
+        }
+
+        // Find active visit, then update financial state based on current charge.
+        const visit = await Visits.findOne({
+            where: visitWhere,
+            order: [['visit_timestamp', 'DESC']]
+        });
+
+        if (!visit) {
+            return res.status(404).json({ error: "Active visit not found" });
+        }
+
+        const transaction = await Transaction.findOne({ where: { visit_id: visit.id }, order: [['createdAt', 'DESC']] });
+        if (!transaction) {
+            return res.status(404).json({ error: "Transaction not found for this visit" });
+        }
+
+        const chargeAtValidation = calculateChargeFromTimestamp(visit.visit_timestamp, now);
+        const withinFreeWindow = chargeAtValidation.elapsedMinutes <= FREE_MINUTES;
+
+        if (withinFreeWindow) {
+            visit.amount = 0;
+            visit.hours = chargeAtValidation.elapsedHours < 1 ? 1 : chargeAtValidation.elapsedHours;
+            visit.paid_status = '0';
+            await visit.save();
+
+            transaction.amount = 0;
+            transaction.status = 'COMPLETED';
+            transaction.payment_timestamp = now;
+            if (!transaction.transaction_code) {
+                transaction.transaction_code = `FREE_EXIT_${visit.id}_${Date.now()}`;
+            }
+            await transaction.save();
+
+            return res.json({
+                message: "Ticket validated for free exit. Grace period started.",
+                within_free_window: true,
+                grace_minutes: PAID_EXIT_GRACE_MINUTES,
+                visit,
+                transaction
+            });
+        }
+
+        // Outside free window: compute required payment and keep transaction pending.
+        visit.amount = chargeAtValidation.amount;
+        visit.hours = chargeAtValidation.elapsedHours < 1 ? 1 : chargeAtValidation.elapsedHours;
+        visit.paid_status = chargeAtValidation.amount > 0 ? '1' : '0';
+        await visit.save();
+
+        transaction.amount = chargeAtValidation.amount;
+        transaction.status = chargeAtValidation.amount > 0 ? 'PEND' : 'COMPLETED';
+        if (chargeAtValidation.amount > 0) {
+            transaction.transaction_code = null;
+            transaction.payment_timestamp = null;
+        } else {
+            transaction.payment_timestamp = now;
+        }
+        await transaction.save();
+
+        return res.status(400).json({
+            message: "Ticket is outside free window. Payment required before exit.",
+            within_free_window: false,
+            amount_due: chargeAtValidation.amount,
+            elapsed_minutes: chargeAtValidation.elapsedMinutes,
+            visit,
+            transaction
+        });
+    } catch (error) {
+        console.error("Error updating payment timestamp:", error);
+        res.status(500).json({ error: "Failed to update payment timestamp" });
+    }
+});
+
+
 /* GET home page. */
 router.get('/', function (req, res, next) {
     res.render('index', { title: 'Pacific Gateway' });

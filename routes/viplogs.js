@@ -20,8 +20,45 @@ router.get('/', AuthenticateToken, async (req, res) => {
         const sortDirection = String(sortDirectionRaw || 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
         const queryOptions = {
+            include: [{
+                model: VIP
+            }],
             order: [[sortField, sortDirection]],
         };
+
+        // Initialize where clause
+        const whereConditions = {};
+
+        // Add date range filter if start_time and end_time are provided
+        if (req.query.start_time || req.query.end_time) {
+            let startDate = req.query.start_time ? new Date(req.query.start_time) : new Date(0);
+            let endDate = req.query.end_time ? new Date(req.query.end_time) : new Date();
+
+            // Validate dates
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                return res.status(400).json({ error: 'Invalid date format. Use ISO 8601 format (e.g., 2026-01-15T10:30:00Z)' });
+            }
+
+            // Convert UTC times to Nairobi local time (UTC+3) for database comparison
+            // Database stores timestamps in local time without timezone info
+            const NAIROBI_UTC_OFFSET_MS = 3 * 60 * 60 * 1000;
+            startDate = new Date(startDate.getTime() + NAIROBI_UTC_OFFSET_MS);
+            endDate = new Date(endDate.getTime() + NAIROBI_UTC_OFFSET_MS);
+
+            whereConditions.createdAt = {
+                [Op.between]: [startDate, endDate]
+            };
+        }
+
+        // Add number_plate filter if provided
+        if (req.query.number_plate) {
+            whereConditions.number_plate = req.query.number_plate;
+        }
+
+        // Only add where clause if there are conditions
+        if (Object.keys(whereConditions).length > 0) {
+            queryOptions.where = whereConditions;
+        }
 
         if (limit && limit > 0) {
             queryOptions.limit = limit;

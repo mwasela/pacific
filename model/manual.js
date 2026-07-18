@@ -1,6 +1,7 @@
 const sequelizeInstance = require('../config/database');
 const { DataTypes } = require('sequelize');
 const Users = require('./Users');
+const Visits = require('./Visits');
 
 const Manual = sequelizeInstance.define('Manual', {
     id: {
@@ -9,6 +10,14 @@ const Manual = sequelizeInstance.define('Manual', {
         autoIncrement: true
     },
     user_id: {
+        type: DataTypes.INTEGER,
+        allowNull: false
+    },
+    visit_id: {
+        type: DataTypes.INTEGER,
+        allowNull: true
+    },
+    barrier: {
         type: DataTypes.INTEGER,
         allowNull: false
     },
@@ -31,5 +40,7 @@ const Manual = sequelizeInstance.define('Manual', {
 
 // Define the association between Manual and Users
 Manual.belongsTo(Users, { foreignKey: 'user_id', targetKey: 'id', as: 'user' });
+// Define the association between Manual and Visits
+Manual.belongsTo(Visits, { foreignKey: 'visit_id', targetKey: 'id'});
 
 module.exports = Manual;

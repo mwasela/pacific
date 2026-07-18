@@ -90,9 +90,22 @@ router.get('/transactions', AuthenticateToken, async (req, res) => {
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
             visitWhere = {
-                createdAt: {
-                    [Op.between]: [thirtyDaysAgo, now]
-                }
+                [Op.and]: [
+                    {
+                        createdAt: {
+                            [Op.between]: [thirtyDaysAgo, now]
+                        }
+                    },
+                    // { status: '0' },
+                    // { paid_status: 0 }
+                ]
+            };
+        } else {
+            visitWhere = {
+                [Op.and]: [
+                    // { status: '0' },
+                    // { paid_status: 0 }
+                ]
             };
         }
 
@@ -339,7 +352,7 @@ router.get('/transactions/range', AuthenticateToken, async (req, res) => {
         const current = Math.max(parseInt(req.query.current, 10) || 1, 1);
         const limit = paginationEnabled
             ? Math.min(Math.max(requestedLimit || 20, 1), 100)
-            : (!numberPlateQuery ? 100 : undefined);
+            : (!numberPlateQuery ? 400 : undefined);
         const sort = req.query.sort || 'createdAt:desc';
         const [sortFieldRaw, sortDirectionRaw] = sort.split(':');
         const allowedSortFields = ['Transaction_timestamp', 'createdAt', 'amount', 'status'];

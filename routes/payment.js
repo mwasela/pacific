@@ -40,6 +40,7 @@ const THIRD_HOUR_RATE = 100;
 const EXTRA_HOURLY_RATE = 50;
 const DAYTIME_CAP = 600;
 const OVERNIGHT_BASE_RATE = 1000;
+const MAX_BILLABLE_AMOUNT = 10000;
 
 const calculateChargeFromVisitTime = (visitTimestamp, now = new Date()) => {
     const visitTime = new Date(visitTimestamp);
@@ -122,6 +123,18 @@ const recalculatePendingVisitsCharges = async () => {
 
             const { amount, elapsedHours } = calculateChargeFromVisitTime(visit.visit_timestamp);
             const normalizedHours = elapsedHours < 1 ? 1 : elapsedHours;
+
+            // Check if amount has reached or exceeded max billable amount
+            if (amount >= MAX_BILLABLE_AMOUNT) {
+                // Auto-close the visit to prevent continued billing
+                // (vehicle likely left without ANPR detection)
+                visit.status = 0;  // Mark as closed
+                visit.amount = 0;  // Reset amount
+                visit.paid_status = 0;  // Mark as unpaid
+                visit.exit_timestamp = new Date();  // Record auto-closure time
+                await visit.save();
+                continue;  // Skip updating transaction for auto-closed visits
+            }
 
             let visitChanged = false;
             if (visit.amount !== amount) {
@@ -375,22 +388,16 @@ router.post('/pay', getAccessToken, async (req, res) => {
         const number_plate = transaction.number_plate;
         let amount = transaction.amount;
 
-        //check if amount is 50 or less, add 5 kes as convenience fee if amount > 50 add 10 kes as convenience fee, then put an entry into Confee table.
+        // Determine convenience fee: 5 KES if amount <= 50, 10 KES if amount >= 100
         let con_fee = 0;
 
-        if (amount <= 50) {
-            con_fee = 5;
-        } else {
+        if (amount >= 100) {
             con_fee = 10;
+        } else {
+            con_fee = 5;
         }
 
         amount += con_fee;
-
-        await Confee.create({
-            visit_id: visit.id,
-            con_fee: con_fee,
-            status: 0
-        });
 
         // // // 3. M-Pesa Constants
         // const shortCode = process.env.MPESA_SHORTCODE;
@@ -448,6 +455,13 @@ router.post('/pay', getAccessToken, async (req, res) => {
         transaction.checkoutID = stkResponse.data.CheckoutRequestID;
         await transaction.save();
 
+        // Create Confee record only after successful STK push
+        await Confee.create({
+            visit_id: visit.id,
+            con_fee: con_fee,
+            status: 0
+        });
+
         res.status(200).json({
             message: "STK Push initiated",
             checkoutID: stkResponse.data.CheckoutRequestID
@@ -503,6 +517,7 @@ router.get('/status', async (req, res) => {
             amount: curentVisit.amount,
             transaction_code: transaction.transaction_code || null, // Using the M-Pesa Receipt Number
             checkoutID: transaction.checkoutID,
+            payment_timestamp: transaction.payment_timestamp, // For countdown timer adjustment
             updatedAt: transaction.updatedAt
         });
 
@@ -557,20 +572,14 @@ router.post('/unpaid/stk', getAccessToken, async (req, res) => {
         let amount = Number(visit.amount) || 0;
         let con_fee = 0;
 
-        if (amount <= 50) {
-            con_fee = 5;
-        } else {
+        // Determine convenience fee: 5 KES if amount <= 50, 10 KES if amount >= 100
+        if (amount >= 100) {
             con_fee = 10;
+        } else {
+            con_fee = 5;
         }
 
         amount += con_fee;
-
-        await Confee.create({
-            visit_id: visit.id,
-            con_fee: con_fee,
-            status: 0
-        });
-
 
         const now = new Date();
         const nairobiDate = new Date(now.getTime() + 3 * 60 * 60 * 1000); // UTC+3
@@ -589,6 +598,13 @@ router.post('/unpaid/stk', getAccessToken, async (req, res) => {
         // Update transaction with new checkoutID
         transaction.checkoutID = stkPushResponse.CheckoutRequestID;
         await transaction.save();
+
+        // Create Confee record only after successful STK push
+        await Confee.create({
+            visit_id: visit.id,
+            con_fee: con_fee,
+            status: 0
+        });
 
         res.json({ message: "STK Push triggered for unpaid visit." });
     } catch (error) {

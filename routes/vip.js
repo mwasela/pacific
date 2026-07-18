@@ -90,6 +90,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
         vip.phone_number = phone_number;
         vip.email = email;
         vip.vehicle_number = vehicle_number;
+        vip.vip_expiry = vip_expiry;
+        vip.vip_status = vip_status;
+        
         await vip.save();
         res.json({ message: 'VIP vehicle updated successfully', vip });
     } catch (error) {
