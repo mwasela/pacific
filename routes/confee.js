@@ -11,14 +11,12 @@ Confee.belongsTo(Visits, { foreignKey: 'visit_id' });
 
 //get all confee entries
 router.get('/', authenticateToken, async (req, res) => {
-    //pagination and sorting
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
     const offset = (page - 1) * limit;
 
-
     try {
-        const confeeEntries = await Confee.findAll({
+        const { count, rows } = await Confee.findAndCountAll({
             include: [{
                 model: Visits
             }],
@@ -26,12 +24,38 @@ router.get('/', authenticateToken, async (req, res) => {
             offset,
             order: [['id', 'DESC']]
         });
-        res.json(confeeEntries);
+        
+        res.json({
+            data: rows,
+            total: count
+        });
     } catch (error) {
         console.error('Error fetching confee entries:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
+// router.get('/', authenticateToken, async (req, res) => {
+//     //pagination and sorting
+//     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+//     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+//     const offset = (page - 1) * limit;
+
+
+//     try {
+//         const confeeEntries = await Confee.findAll({
+//             include: [{
+//                 model: Visits
+//             }],
+//             limit,
+//             offset,
+//             order: [['id', 'DESC']]
+//         });
+//         res.json(confeeEntries);
+//     } catch (error) {
+//         console.error('Error fetching confee entries:', error);
+//         res.status(500).json({ error: 'Internal Server Error' });
+//     }
+// });
 
 //get confee entry by id
 router.get('/:id', authenticateToken, async (req, res) => {
