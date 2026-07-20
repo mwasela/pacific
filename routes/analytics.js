@@ -752,29 +752,17 @@ router.get('/summary', authenticateToken, async (req, res) => {
             }
         };
 
-        // Closed visits only (for successful exits count)
-        const closedVisitsWhere = {
-            ...dateRangeWhere,
-            status: 0
-        };
-
-        // Closed and paid visits (for successful exits count)
-        const closedPaidWhere = {
-            ...closedVisitsWhere,
-            paid_status: 0
-        };
-
         // Query all needed data in parallel
         const [
-            successfulExits,
+            totalExits,
             pendingExits,
             allEntries,
             manualAndMpesaData
         ] = await Promise.all([
-            // Successful Exits (closed/paid visits that have exited)
+            // Total Exits (all visits that have exited, regardless of payment status)
             Visits.count({
                 where: {
-                    ...closedPaidWhere,
+                    ...dateRangeWhere,
                     exit_timestamp: { [Op.ne]: null }
                 }
             }),
@@ -791,7 +779,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
             Visits.count({ where: dateRangeWhere }),
 
             // Manual and Mpesa revenue/exits breakdown (only COMPLETED transactions)
-            // This is the source of truth for collected revenue
+            // This is the source of truth for collected revenue and paid exit counts
             Transaction.findAll({
                 where: {
                     status: 'COMPLETED',
@@ -815,6 +803,10 @@ router.get('/summary', authenticateToken, async (req, res) => {
         const manualRevenue = Number(transactionData.manual_revenue || 0);
         const mpesaRevenue = Number(transactionData.mpesa_revenue || 0);
         const collectedRevenue = manualRevenue + mpesaRevenue;
+        const manualExits = Number(transactionData.manual_exits || 0);
+        const mpesaExits = Number(transactionData.mpesa_exits || 0);
+        const paidExits = manualExits + mpesaExits;
+        const unpaidExits = totalExits - paidExits; // Exits without completed payments
 
         res.json({
             period,
@@ -823,13 +815,14 @@ router.get('/summary', authenticateToken, async (req, res) => {
                 to: endDate.toISOString()
             },
             collected_revenue: collectedRevenue,
-            successful_exits: Number(successfulExits || 0),
+            successful_exits: Number(totalExits || 0),
+            unpaid_exits: unpaidExits,
             pending_exits: Number(pendingExits || 0),
             all_entries: Number(allEntries || 0),
             manual_revenue: manualRevenue,
             mpesa_revenue: mpesaRevenue,
-            manual_exits: Number(transactionData.manual_exits || 0),
-            mpesa_exits: Number(transactionData.mpesa_exits || 0)
+            manual_exits: manualExits,
+            mpesa_exits: mpesaExits
         });
     } catch (error) {
         console.error('Error fetching summary analytics:', error);
