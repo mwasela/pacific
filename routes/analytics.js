@@ -139,7 +139,7 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
 
         const [
             totalTransactions,
-            totalAmount,
+            transactionData,
             uniquePlates,
             pendingExits,
             pendingUnpaidAmount,
@@ -148,8 +148,23 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
             Visits.count({
                 where: visitWhere
             }),
-            Visits.sum('amount', {
-                where: closedPaidVisitWhere
+            // Get revenue breakdown from Transaction table (source of truth)
+            Transaction.findAll({
+                where: {
+                    status: 'COMPLETED',
+                    Transaction_timestamp: {
+                        [Op.between]: [
+                            visitWhere.visit_timestamp?.[Op.between]?.[0] || new Date(new Date().getTime() - 30 * 24 * 60 * 60 * 1000),
+                            visitWhere.visit_timestamp?.[Op.between]?.[1] || new Date()
+                        ]
+                    }
+                },
+                attributes: [
+                    [fn('SUM', col('amount')), 'total_amount'],
+                    [fn('SUM', literal(`CASE WHEN transaction_code LIKE 'MANUAL_PAY_%' THEN amount ELSE 0 END`)), 'manual_revenue'],
+                    [fn('SUM', literal(`CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN amount ELSE 0 END`)), 'mpesa_revenue']
+                ],
+                raw: true
             }),
             Visits.count({
                 where: closedPaidVisitWhere,
@@ -173,9 +188,12 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
             })
         ]);
 
+        const txData = transactionData[0] || {};
+        const totalAmount = Number(txData.total_amount || 0);
+
         res.json({
             total_transactions: totalTransactions,
-            total_amount: Number(totalAmount || 0),
+            total_amount: totalAmount,
             unique_plates: uniquePlates,
             pending_exits: pendingExits,
             pending_unpaid_amount: Number(pendingUnpaidAmount || 0),
@@ -734,13 +752,13 @@ router.get('/summary', authenticateToken, async (req, res) => {
             }
         };
 
-        // Closed visits only (for revenue calculations)
+        // Closed visits only (for successful exits count)
         const closedVisitsWhere = {
             ...dateRangeWhere,
             status: 0
         };
 
-        // Closed and paid visits (for collected revenue)
+        // Closed and paid visits (for successful exits count)
         const closedPaidWhere = {
             ...closedVisitsWhere,
             paid_status: 0
@@ -748,15 +766,11 @@ router.get('/summary', authenticateToken, async (req, res) => {
 
         // Query all needed data in parallel
         const [
-            collectedRevenue,
             successfulExits,
             pendingExits,
             allEntries,
             manualAndMpesaData
         ] = await Promise.all([
-            // Collected Revenue (closed/paid visits)
-            Visits.sum('amount', { where: closedPaidWhere }),
-
             // Successful Exits (closed/paid visits that have exited)
             Visits.count({
                 where: {
@@ -777,6 +791,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
             Visits.count({ where: dateRangeWhere }),
 
             // Manual and Mpesa revenue/exits breakdown (only COMPLETED transactions)
+            // This is the source of truth for collected revenue
             Transaction.findAll({
                 where: {
                     status: 'COMPLETED',
@@ -795,6 +810,11 @@ router.get('/summary', authenticateToken, async (req, res) => {
         ]);
 
         const transactionData = manualAndMpesaData[0] || {};
+        
+        // Collected revenue is the sum of manual + mpesa revenues from Transaction table
+        const manualRevenue = Number(transactionData.manual_revenue || 0);
+        const mpesaRevenue = Number(transactionData.mpesa_revenue || 0);
+        const collectedRevenue = manualRevenue + mpesaRevenue;
 
         res.json({
             period,
@@ -802,12 +822,12 @@ router.get('/summary', authenticateToken, async (req, res) => {
                 from: startDate.toISOString(),
                 to: endDate.toISOString()
             },
-            collected_revenue: Number(collectedRevenue || 0),
+            collected_revenue: collectedRevenue,
             successful_exits: Number(successfulExits || 0),
             pending_exits: Number(pendingExits || 0),
             all_entries: Number(allEntries || 0),
-            manual_revenue: Number(transactionData.manual_revenue || 0),
-            mpesa_revenue: Number(transactionData.mpesa_revenue || 0),
+            manual_revenue: manualRevenue,
+            mpesa_revenue: mpesaRevenue,
             manual_exits: Number(transactionData.manual_exits || 0),
             mpesa_exits: Number(transactionData.mpesa_exits || 0)
         });
