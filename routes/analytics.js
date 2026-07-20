@@ -7,6 +7,19 @@ const Visits = require('../model/Visits');
 const Viplogs = require('../model/Viplogs');
 const authenticateToken = require('../middleware/auth');
 
+// Helper: Get current time in Nairobi (UTC+3)
+const getNairobiNow = () => {
+    const now = new Date();
+    now.setHours(now.getHours() + 3);
+    return now;
+};
+
+// Helper: Get today's date in Nairobi timezone
+const getNairobiToday = () => {
+    const nairobiNow = getNairobiNow();
+    return new Date(nairobiNow.getFullYear(), nairobiNow.getMonth(), nairobiNow.getDate(), 0, 0, 0, 0);
+};
+
 const parseQueryDate = (value, endOfDay = false) => {
     if (typeof value !== 'string') {
         return null;
@@ -101,8 +114,8 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
         const hasFilters = visitWhere && (visitWhere[Op.and] || Object.keys(visitWhere).length > 0);
 
         if (!hasFilters) {
-            const now = new Date();
-            // Default: today (00:00 to now)
+            const now = getNairobiNow();
+            // Default: today (00:00 to now) - in Nairobi timezone
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
 
             visitWhere = {
@@ -125,13 +138,13 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
             dateRangeDebug = `Custom range (${visitWhere[Op.and].length} filters)`;
             // If no explicit date range found, extract from dateRangeWhere (which was parsed from req.query)
             if (!transactionStartDate || !transactionEndDate) {
-                const now = new Date();
+                const now = getNairobiNow();
                 transactionStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
                 transactionEndDate = now;
             }
         } else {
             // Fallback: today's date range
-            const now = new Date();
+            const now = getNairobiNow();
             transactionStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
             transactionEndDate = now;
         }
@@ -204,8 +217,8 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
                     status: 'COMPLETED',
                     Transaction_timestamp: {
                         [Op.between]: [
-                            new Date(new Date().getFullYear(), new Date().getMonth(), 1, 0, 0, 0, 0),
-                            new Date()
+                            new Date(getNairobiNow().getFullYear(), getNairobiNow().getMonth(), 1, 0, 0, 0, 0),
+                            getNairobiNow()
                         ]
                     }
                 }
@@ -477,14 +490,14 @@ router.get('/revenue', authenticateToken, async (req, res) => {
                 endDate = toDate;
             } else {
                 // Invalid dates provided, use default
-                const now = new Date();
+                const now = getNairobiNow();
                 endDate = new Date(now);
                 startDate = new Date(now);
                 startDate.setDate(startDate.getDate() - 30);
             }
         } else {
-            // Default: last 30 days (matches /summary default)
-            const now = new Date();
+            // Default: last 30 days (matches /summary default) - in Nairobi timezone
+            const now = getNairobiNow();
             endDate = new Date(now);
             startDate = new Date(now);
             startDate.setDate(startDate.getDate() - 30);
@@ -607,7 +620,7 @@ router.get('/daily-income', authenticateToken, async (req, res) => {
             startDate = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate(), 0, 0, 0);
             endDate = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate(), 23, 59, 59);
         } else {
-            const today = new Date();
+            const today = getNairobiNow();
             startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
             endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
         }
@@ -670,8 +683,8 @@ router.get('/income-per-slot', authenticateToken, async (req, res) => {
                 return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
             }
         } else {
-            // Default to past 24 hours
-            endDate = new Date();
+            // Default to past 24 hours - in Nairobi timezone
+            endDate = getNairobiNow();
             startDate = new Date(endDate.getTime() - 24 * 60 * 60 * 1000);
         }
 
@@ -787,8 +800,8 @@ router.get('/income-per-slot', authenticateToken, async (req, res) => {
 
 // Helper function to calculate date range based on period
 const getPeriodDateRange = (period) => {
-    const endDate = new Date();
-    let startDate = new Date();
+    const endDate = getNairobiNow();
+    let startDate = getNairobiNow();
 
     switch (period) {
         case '24h':
@@ -822,8 +835,8 @@ router.get('/summary', authenticateToken, async (req, res) => {
                 return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
             }
         } else {
-            // Default: today (00:00 to now)
-            const now = new Date();
+            // Default: today (00:00 to now) - in Nairobi timezone
+            const now = getNairobiNow();
             endDate = new Date(now);
             startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
         }
