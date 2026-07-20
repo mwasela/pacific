@@ -2,7 +2,9 @@ const express = require('express');
 const { Op, fn, col, literal } = require('sequelize');
 const router = express.Router();
 const Transaction = require('../model/Transaction');
+const dayjs = require('dayjs');
 const Visits = require('../model/Visits');
+const Viplogs = require('../model/Viplogs');
 const authenticateToken = require('../middleware/auth');
 
 const parseQueryDate = (value, endOfDay = false) => {
@@ -100,29 +102,41 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
 
         if (!hasFilters) {
             const now = new Date();
-            // Optional: Set to end of today so you don't miss mid-day entries
-            now.setHours(23, 59, 59, 999);
-
-            const thirtyDaysAgo = new Date(now);
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-            thirtyDaysAgo.setHours(0, 0, 0, 0); // Start from the beginning of that day
+            // Default: today (00:00 to now)
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
 
             visitWhere = {
                 visit_timestamp: {
-                    [Op.between]: [thirtyDaysAgo, now]
+                    [Op.between]: [todayStart, now]
                 }
             };
         }
 
         // 2. Fixed Debug Logging Check
         let dateRangeDebug = 'Custom / Complex Filter';
+        let transactionStartDate, transactionEndDate;
+
         if (visitWhere.visit_timestamp && visitWhere.visit_timestamp[Op.between]) {
             const range = visitWhere.visit_timestamp[Op.between];
+            transactionStartDate = range[0];
+            transactionEndDate = range[1];
             dateRangeDebug = `${range[0].toISOString()} to ${range[1].toISOString()}`;
         } else if (visitWhere[Op.and]) {
             dateRangeDebug = `Custom range (${visitWhere[Op.and].length} filters)`;
+            // If no explicit date range found, extract from dateRangeWhere (which was parsed from req.query)
+            if (!transactionStartDate || !transactionEndDate) {
+                const now = new Date();
+                transactionStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+                transactionEndDate = now;
+            }
+        } else {
+            // Fallback: today's date range
+            const now = new Date();
+            transactionStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+            transactionEndDate = now;
         }
         console.log('Dashboard date range:', dateRangeDebug);
+        console.log('Transaction date range:', transactionStartDate?.toISOString(), 'to', transactionEndDate?.toISOString());
 
         // 3. Combine filters safely
         const closedPaidVisitWhere = {
@@ -143,7 +157,8 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
             uniquePlates,
             pendingExits,
             pendingUnpaidAmount,
-            completedSessions
+            completedSessions,
+            thisMonthRevenue
         ] = await Promise.all([
             Visits.count({
                 where: visitWhere
@@ -153,10 +168,7 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
                 where: {
                     status: 'COMPLETED',
                     Transaction_timestamp: {
-                        [Op.between]: [
-                            visitWhere.visit_timestamp?.[Op.between]?.[0] || new Date(new Date().getTime() - 30 * 24 * 60 * 60 * 1000),
-                            visitWhere.visit_timestamp?.[Op.between]?.[1] || new Date()
-                        ]
+                        [Op.between]: [transactionStartDate, transactionEndDate]
                     }
                 },
                 attributes: [
@@ -185,11 +197,29 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
                     ...closedPaidVisitWhere,
                     exit_timestamp: { [Op.ne]: null }
                 }
+            }),
+            // This month's revenue (from 1st of current month to now)
+            Transaction.sum('amount', {
+                where: {
+                    status: 'COMPLETED',
+                    Transaction_timestamp: {
+                        [Op.between]: [
+                            new Date(new Date().getFullYear(), new Date().getMonth(), 1, 0, 0, 0, 0),
+                            new Date()
+                        ]
+                    }
+                }
             })
         ]);
 
         const txData = transactionData[0] || {};
         const totalAmount = Number(txData.total_amount || 0);
+        
+        console.log('Transaction query result:', {
+            total_amount: txData.total_amount,
+            manual_revenue: txData.manual_revenue,
+            mpesa_revenue: txData.mpesa_revenue
+        });
 
         res.json({
             total_transactions: totalTransactions,
@@ -197,7 +227,8 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
             unique_plates: uniquePlates,
             pending_exits: pendingExits,
             pending_unpaid_amount: Number(pendingUnpaidAmount || 0),
-            completed_sessions: completedSessions
+            completed_sessions: completedSessions,
+            this_months: Number(thisMonthRevenue || 0)
         });
     } catch (error) {
         console.error('Error fetching dashboard analytics:', error);
@@ -430,34 +461,67 @@ router.get('/revenue', authenticateToken, async (req, res) => {
         if (vipPayRaw && vipPayRaw !== '0' && vipPayRaw !== '1') return res.status(400).json({ error: 'Invalid vip_pay. Use 0 or 1' });
         if (visitStatusRaw && visitStatusRaw !== '0' && visitStatusRaw !== '1') return res.status(400).json({ error: 'Invalid visit_status. Use 0 or 1' });
 
-        // 2. Build the unified filter array for the Visits model
-        const visitFilters = [];
+        // 2. Build Transaction filters (primary source)
+        const transactionFilters = [];
+        transactionFilters.push({ status: 'COMPLETED' });
 
-        // Base filter: Only include closed visits (status = 0)
-        // This matches dashboard logic and ensures consistency across endpoints
-        visitFilters.push({ status: 0 });
-
-        // INTEGRATED: Using your custom parseQueryDate helper function safely
+        // Date range filter on Transaction_timestamp
         let { from, to } = req.query;
+        let startDate, endDate;
+        
         if (from && to) {
-            const startDate = parseQueryDate(from);
-            const endDate = parseQueryDate(to, true); // true sets it to 23:59:59.999
-            
-            if (!startDate || !endDate) {
-                return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+            const fromDate = parseQueryDate(from);
+            const toDate = parseQueryDate(to, true);
+            if (fromDate && toDate) {
+                startDate = fromDate;
+                endDate = toDate;
+            } else {
+                // Invalid dates provided, use default
+                const now = new Date();
+                endDate = new Date(now);
+                startDate = new Date(now);
+                startDate.setDate(startDate.getDate() - 30);
             }
-
-            visitFilters.push({
-                visit_timestamp: {
-                    [Op.between]: [startDate, endDate]
-                }
-            });
+        } else {
+            // Default: last 30 days (matches /summary default)
+            const now = new Date();
+            endDate = new Date(now);
+            startDate = new Date(now);
+            startDate.setDate(startDate.getDate() - 30);
         }
+        
+        transactionFilters.push({ 
+            Transaction_timestamp: { 
+                [Op.between]: [startDate, endDate] 
+            } 
+        });
 
-        // Apply string search filters using vehicle_number column
+        // Number plate filter (direct on Transaction)
         if (vehicleNumberQuery) {
-            visitFilters.push({ vehicle_number: { [Op.like]: `%${vehicleNumberQuery}%` } });
+            transactionFilters.push({ number_plate: { [Op.like]: `%${vehicleNumberQuery}%` } });
         }
+
+        // Payment type filters (manual vs mpesa)
+        if (manualPayRaw !== undefined) {
+            transactionFilters.push(
+                manualPayRaw === '1'
+                    ? { transaction_code: { [Op.like]: 'MANUAL_PAY_%' } }
+                    : { transaction_code: { [Op.notLike]: 'MANUAL_PAY_%' } }
+            );
+        }
+
+        // VIP filter
+        if (vipPayRaw !== undefined) {
+            transactionFilters.push(
+                vipPayRaw === '1'
+                    ? { transaction_code: { [Op.like]: 'VIP%' } }
+                    : { transaction_code: { [Op.notLike]: 'VIP%' } }
+            );
+        }
+
+        // Build Visit filters for eager loading
+        const visitFilters = [];
+        visitFilters.push({ status: 0 });
 
         if (paidStatusRaw !== undefined) {
             visitFilters.push({ paid_status: paidStatusRaw });
@@ -467,38 +531,52 @@ router.get('/revenue', authenticateToken, async (req, res) => {
             visitFilters.push(freeVisitRaw === '1' ? { amount: 0 } : { amount: { [Op.gt]: 0 } });
         }
 
-        // Handle VIP filtering via the actual user_type column
-        if (vipPayRaw !== undefined) {
-            visitFilters.push(vipPayRaw === '1' ? { user_type: 2 } : { user_type: { [Op.ne]: 2 } });
-        }
-
-        // Set up separate base states for open and completed evaluations
-        const baseWhereClause = visitFilters.length > 0 ? { [Op.and]: [...visitFilters] } : {};
-
-        // Inject visit status constraints (open/closed based on exit_timestamp)
         if (visitStatusRaw !== undefined) {
             visitFilters.push(visitStatusRaw === '1' ? { exit_timestamp: null } : { exit_timestamp: { [Op.ne]: null } });
         }
-        const generalWhereClause = visitFilters.length > 0 ? { [Op.and]: visitFilters } : {};
 
-        // 3. Execute queries concurrently using target columns from your model schema
+        const transactionWhere = transactionFilters.length > 0 ? { [Op.and]: transactionFilters } : {};
+        const visitWhere = visitFilters.length > 0 ? { [Op.and]: visitFilters } : {};
+
+        // 3. Execute queries using Transaction table as primary source with Visits eager load
         const [totalRevenue, uniquePlates, rawVisitRecords, openVisitRecords, completedVisitRecords] = await Promise.all([
-            Visits.sum('amount', { where: generalWhereClause }),
-            Visits.count({
-                where: generalWhereClause,
+            // Total revenue from COMPLETED transactions
+            Transaction.sum('amount', { where: transactionWhere }),
+
+            // Unique number plates from COMPLETED transactions
+            Transaction.count({
+                where: transactionWhere,
                 distinct: true,
-                col: 'vehicle_number'
+                col: 'number_plate'
             }),
-            Visits.count({ where: generalWhereClause }),
-            Visits.count({
-                where: { ...baseWhereClause, exit_timestamp: null }
+
+            // Raw visit records - count transactions (each transaction ties to one visit)
+            Transaction.count({ where: transactionWhere }),
+
+            // Open visit records - transactions with associated visits still in parking
+            Transaction.count({
+                where: transactionWhere,
+                include: [{
+                    model: Visits,
+                    attributes: [],
+                    where: { ...visitWhere, exit_timestamp: null },
+                    required: true
+                }]
             }),
-            Visits.count({
-                where: { ...baseWhereClause, exit_timestamp: { [Op.ne]: null } }
+
+            // Completed visit records - transactions with associated visits that have exited
+            Transaction.count({
+                where: transactionWhere,
+                include: [{
+                    model: Visits,
+                    attributes: [],
+                    where: { ...visitWhere, exit_timestamp: { [Op.ne]: null } },
+                    required: true
+                }]
             })
         ]);
 
-        // 4. Return matching metric outputs
+        // 4. Return matching metric outputs (maintain frontend compatibility)
         res.json({
             total_revenue: Number(totalRevenue || 0),
             unique_number_plates: uniquePlates,
@@ -513,10 +591,6 @@ router.get('/revenue', authenticateToken, async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch revenue analytics' });
     }
 });
-
-
-
-
 
 
 //get a daily income report summary for a given specific date, if no date is provided, use today as default, 
@@ -736,14 +810,23 @@ const getPeriodDateRange = (period) => {
 // Summary endpoint for period statistics (24h, 7d, 1m)
 router.get('/summary', authenticateToken, async (req, res) => {
     try {
-        const { period = '24h' } = req.query;
+        const { from, to } = req.query;
+        let startDate, endDate;
 
-        // Validate period
-        if (!['24h', '7d', '1m'].includes(period)) {
-            return res.status(400).json({ error: 'Invalid period. Use 24h, 7d, or 1m' });
+        if (from && to) {
+            // Validate and parse provided dates
+            startDate = dayjs(from, 'YYYY-MM-DD').toDate();
+            endDate = dayjs(to, 'YYYY-MM-DD').endOf('day').toDate();
+
+            if (!startDate.getTime() || !endDate.getTime()) {
+                return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+            }
+        } else {
+            // Default: today (00:00 to now)
+            const now = new Date();
+            endDate = new Date(now);
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
         }
-
-        const { startDate, endDate } = getPeriodDateRange(period);
 
         // Base where clause for date range only (for counting all entries)
         const dateRangeWhere = {
@@ -757,7 +840,8 @@ router.get('/summary', authenticateToken, async (req, res) => {
             totalExits,
             pendingExits,
             allEntries,
-            manualAndMpesaData
+            manualAndMpesaData,
+            vipLogsCount
         ] = await Promise.all([
             // Total Exits (all visits that have exited, regardless of payment status)
             Visits.count({
@@ -794,6 +878,15 @@ router.get('/summary', authenticateToken, async (req, res) => {
                     [fn('COUNT', literal(`CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN 1 END`)), 'mpesa_exits']
                 ],
                 raw: true
+            }),
+
+            // VIP Logs count for tenant exits in the period
+            require('../model/Viplogs').count({
+                where: {
+                    createdAt: {
+                        [Op.between]: [startDate, endDate]
+                    }
+                }
             })
         ]);
 
@@ -809,7 +902,6 @@ router.get('/summary', authenticateToken, async (req, res) => {
         const unpaidExits = totalExits - paidExits; // Exits without completed payments
 
         res.json({
-            period,
             time_range: {
                 from: startDate.toISOString(),
                 to: endDate.toISOString()
@@ -822,7 +914,8 @@ router.get('/summary', authenticateToken, async (req, res) => {
             manual_revenue: manualRevenue,
             mpesa_revenue: mpesaRevenue,
             manual_exits: manualExits,
-            mpesa_exits: mpesaExits
+            mpesa_exits: mpesaExits,
+            tenant_exits: Number(vipLogsCount || 0)
         });
     } catch (error) {
         console.error('Error fetching summary analytics:', error);

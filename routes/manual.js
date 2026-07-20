@@ -5,6 +5,9 @@ const Manual = require('../model/manual');
 const Users = require('../model/Users');
 const Visits = require('../model/Visits');
 const Transaction = require('../model/Transaction');
+const VIP = require('../model/VIP');
+const Viplogs = require('../model/Viplogs');
+
 const openbarrier = require('../services/barrier');
 const authenticateToken = require('../middleware/auth');
 
@@ -36,6 +39,20 @@ router.post('/', authenticateToken, async (req, res) => {
             if (unpaidTransaction) {
                 return res.status(400).json({ message: 'Cannot open barrier, payment required' });
             }
+        }
+
+        // Check if this vehicle is a VIP
+        const vipRecord = await VIP.findOne({
+            where: { vehicle_number: number_plate }
+        });
+
+        // If VIP, create a Viplogs entry first
+        if (vipRecord) {
+            await Viplogs.create({
+                vip_id: vipRecord.id,
+                number_plate: number_plate,
+                action: 0  // 0 for entry
+            });
         }
 
         //open barrier
@@ -131,6 +148,20 @@ router.post('/visit', authenticateToken, async (req, res) => {
 
         if (!transaction) {
             return res.status(404).json({ message: 'Transaction not found for this visit' });
+        }
+
+        // Check if this vehicle is a VIP
+        const vipRecord = await VIP.findOne({
+            where: { vehicle_number: visit.vehicle_number }
+        });
+
+        // If VIP, create a Viplogs entry first
+        if (vipRecord) {
+            await Viplogs.create({
+                vip_id: vipRecord.id,
+                number_plate: visit.vehicle_number,
+                action: 1  // 1 for exit
+            });
         }
 
         // Update the visit and transaction to reflect the exit

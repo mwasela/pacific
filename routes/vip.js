@@ -48,6 +48,7 @@ router.post('/', authenticateToken, async (req, res) => {
         phone_number,
         email,
         vehicle_number,
+        code
     } = req.body;
 
     try {
@@ -57,6 +58,9 @@ router.post('/', authenticateToken, async (req, res) => {
             phone_number,
             email,
             vehicle_number,
+            code,
+            vip_expiry: new Date(new Date().setMonth(new Date().getMonth() + 3)), // Set expiry to 3 months from now
+
         });
 
         res.json(vip);
@@ -76,7 +80,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
         email,
         vehicle_number,
         vip_expiry,
-        vip_status
+        vip_status,
+        code
     } = req.body;
 
     try {
@@ -87,12 +92,13 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
         vip.fname = fname;
         vip.lname = lname;
+        vip.code = code; // Assuming the code is not being updated here
         vip.phone_number = phone_number;
         vip.email = email;
         vip.vehicle_number = vehicle_number;
         vip.vip_expiry = vip_expiry;
         vip.vip_status = vip_status;
-        
+
         await vip.save();
         res.json({ message: 'VIP vehicle updated successfully', vip });
     } catch (error) {
