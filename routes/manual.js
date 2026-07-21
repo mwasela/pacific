@@ -55,6 +55,12 @@ router.post('/', authenticateToken, async (req, res) => {
             });
         }
 
+        // Update entry timestamp if there's an open visit
+        if (openVisit) {
+            openVisit.visit_timestamp = new Date();
+            await openVisit.save();
+        }
+
         //open barrier
         const command = await openbarrier(barrier);
         
@@ -165,7 +171,7 @@ router.post('/visit', authenticateToken, async (req, res) => {
         }
 
         // Update the visit and transaction to reflect the exit
-        visit.exit_time = new Date();
+        visit.exit_timestamp = new Date();
         visit.status = '0';
         await visit.save();
 
