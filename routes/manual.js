@@ -26,20 +26,20 @@ router.post('/', authenticateToken, async (req, res) => {
             }
         });
 
-        // Only block barrier if there's an open visit with an unpaid transaction
-        if (openVisit) {
-            const unpaidTransaction = await Transaction.findOne({
-                where: {
-                    visit_id: openVisit.id,
-                    status: { [Op.ne]: 'COMPLETED' } // Not completed = unpaid
-                },
-                order: [['createdAt', 'DESC']]
-            });
+        // // Only block barrier if there's an open visit with an unpaid transaction
+        // if (openVisit) {
+        //     const unpaidTransaction = await Transaction.findOne({
+        //         where: {
+        //             visit_id: openVisit.id,
+        //             status: { [Op.ne]: 'COMPLETED' } // Not completed = unpaid
+        //         },
+        //         order: [['createdAt', 'DESC']]
+        //     });
 
-            if (unpaidTransaction) {
-                return res.status(400).json({ message: 'Cannot open barrier, payment required' });
-            }
-        }
+        //     if (unpaidTransaction) {
+        //         return res.status(400).json({ message: 'Cannot open barrier, payment required' });
+        //     }
+        // }
 
         // Check if this vehicle is a VIP
         const vipRecord = await VIP.findOne({
