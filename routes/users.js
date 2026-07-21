@@ -89,7 +89,7 @@ router.get('/me', authenticateToken, async (req, res) => {
 //edit user info
 router.put('/:id', authenticateToken, async (req, res) => {
     const userId = req.params.id;
-    const { email, phone_number, status, role } = req.body;
+    const { email, phone_number, status, role, username } = req.body;
 
     try {
         const user = await Users.findByPk(userId);
@@ -100,6 +100,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         user.phone_number = phone_number;
         user.status = status;
         user.role = role;
+        user.username = username;
         await user.save();
 
         res.json({ message: 'User updated successfully', user });
