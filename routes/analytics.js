@@ -5,6 +5,7 @@ const Transaction = require('../model/Transaction');
 const dayjs = require('dayjs');
 const Visits = require('../model/Visits');
 const Viplogs = require('../model/Viplogs');
+const { getTransactionsByVisitRange } = require('../services/transactionService');
 const authenticateToken = require('../middleware/auth');
 
 // Helper: Get current time in Nairobi (UTC+3)
@@ -821,34 +822,152 @@ const getPeriodDateRange = (period) => {
 };
 
 // Summary endpoint for period statistics (24h, 7d, 1m)
+// router.get('/summary', authenticateToken, async (req, res) => {
+//     try {
+//         const { from, to } = req.query;
+//         let startDate, endDate;
+
+//         if (from && to) {
+//             // Validate and parse provided dates
+//             startDate = dayjs(from, 'YYYY-MM-DD').toDate();
+//             endDate = dayjs(to, 'YYYY-MM-DD').endOf('day').toDate();
+
+//             if (!startDate.getTime() || !endDate.getTime()) {
+//                 return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+//             }
+//         } else {
+//             // Default: today (00:00 to now) - in Nairobi timezone
+//             const now = getNairobiNow();
+//             endDate = new Date(now);
+//             startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+//         }
+
+//         // Base where clause for date range only (for counting all entries)
+//         const dateRangeWhere = {
+//             visit_timestamp: {
+//                 [Op.between]: [startDate, endDate]
+//             }
+//         };
+
+//         // Query all needed data in parallel
+//         const [
+//             totalExits,
+//             pendingExits,
+//             allEntries,
+//             manualAndMpesaData,
+//             vipLogsCount
+//         ] = await Promise.all([
+//             // Total Exits (all visits that have exited, regardless of payment status)
+//             Visits.count({
+//                 where: {
+//                     ...dateRangeWhere,
+//                     exit_timestamp: { [Op.ne]: null }
+//                 }
+//             }),
+
+//             // Pending Exits (all visits still pending exit, any status)
+//             Visits.count({
+//                 where: {
+//                     ...dateRangeWhere,
+//                     exit_timestamp: null
+//                 }
+//             }),
+
+//             // All Entries (all visits in period, any status)
+//             Visits.count({ where: dateRangeWhere }),
+
+//             // Manual and Mpesa revenue/exits breakdown (only COMPLETED transactions)
+//             // This is the source of truth for collected revenue and paid exit counts
+//             Transaction.findAll({
+//                 where: {
+//                     status: 'COMPLETED',
+//                     Transaction_timestamp: {
+//                         [Op.between]: [startDate, endDate]
+//                     }
+//                 },
+//                 attributes: [
+//                     [fn('SUM', literal(`CASE WHEN transaction_code LIKE 'MANUAL_PAY_%' THEN amount ELSE 0 END`)), 'manual_revenue'],
+//                     [fn('SUM', literal(`CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN amount ELSE 0 END`)), 'mpesa_revenue'],
+//                     [fn('COUNT', literal(`CASE WHEN transaction_code LIKE 'MANUAL_PAY_%' THEN 1 END`)), 'manual_exits'],
+//                     [fn('COUNT', literal(`CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN 1 END`)), 'mpesa_exits']
+//                 ],
+//                 raw: true
+//             }),
+
+//             // VIP Logs count for tenant exits in the period
+//             require('../model/Viplogs').count({
+//                 where: {
+//                     createdAt: {
+//                         [Op.between]: [startDate, endDate]
+//                     }
+//                 }
+//             })
+//         ]);
+
+//         const transactionData = manualAndMpesaData[0] || {};
+        
+//         // Collected revenue is the sum of manual + mpesa revenues from Transaction table
+//         const manualRevenue = Number(transactionData.manual_revenue || 0);
+//         const mpesaRevenue = Number(transactionData.mpesa_revenue || 0);
+//         const collectedRevenue = manualRevenue + mpesaRevenue;
+//         const manualExits = Number(transactionData.manual_exits || 0);
+//         const mpesaExits = Number(transactionData.mpesa_exits || 0);
+//         const paidExits = manualExits + mpesaExits;
+//         const unpaidExits = totalExits - paidExits; // Exits without completed payments
+
+//         res.json({
+//             time_range: {
+//                 from: startDate.toISOString(),
+//                 to: endDate.toISOString()
+//             },
+//             collected_revenue: collectedRevenue,
+//             successful_exits: Number(totalExits || 0),
+//             unpaid_exits: unpaidExits,
+//             pending_exits: Number(pendingExits || 0),
+//             all_entries: Number(allEntries || 0),
+//             manual_revenue: manualRevenue,
+//             mpesa_revenue: mpesaRevenue,
+//             manual_exits: manualExits,
+//             mpesa_exits: mpesaExits,
+//             tenant_exits: Number(vipLogsCount || 0)
+//         });
+//     } catch (error) {
+//         console.error('Error fetching summary analytics:', error);
+//         res.status(500).json({ error: 'Failed to fetch summary analytics' });
+//     }
+// });
+
+
 router.get('/summary', authenticateToken, async (req, res) => {
     try {
         const { from, to } = req.query;
         let startDate, endDate;
 
-        if (from && to) {
-            // Validate and parse provided dates
-            startDate = dayjs(from, 'YYYY-MM-DD').toDate();
-            endDate = dayjs(to, 'YYYY-MM-DD').endOf('day').toDate();
-
-            if (!startDate.getTime() || !endDate.getTime()) {
-                return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+        if (from || to) {
+            if (from) {
+                startDate = new Date(from);
+                if (Number.isNaN(startDate.getTime())) return res.status(400).json({ error: 'Invalid from date' });
+            }
+            if (to) {
+                endDate = new Date(to);
+                if (Number.isNaN(endDate.getTime())) return res.status(400).json({ error: 'Invalid to date' });
+                endDate.setHours(23, 59, 59, 999);
             }
         } else {
-            // Default: today (00:00 to now) - in Nairobi timezone
-            const now = getNairobiNow();
-            endDate = new Date(now);
-            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+            // Default: 30 days window or Today (00:00 to 23:59:59) matching base behavior
+            const now = new Date();
+            endDate = new Date(now.setHours(23, 59, 59, 999));
+            startDate = new Date();
+            startDate.setHours(0, 0, 0, 0);
         }
 
-        // Base where clause for date range only (for counting all entries)
+        // Standardized createdAt filter to match base endpoint behavior
         const dateRangeWhere = {
-            visit_timestamp: {
+            createdAt: {
                 [Op.between]: [startDate, endDate]
             }
         };
 
-        // Query all needed data in parallel
         const [
             totalExits,
             pendingExits,
@@ -856,33 +975,20 @@ router.get('/summary', authenticateToken, async (req, res) => {
             manualAndMpesaData,
             vipLogsCount
         ] = await Promise.all([
-            // Total Exits (all visits that have exited, regardless of payment status)
             Visits.count({
-                where: {
-                    ...dateRangeWhere,
-                    exit_timestamp: { [Op.ne]: null }
-                }
+                where: { ...dateRangeWhere, exit_timestamp: { [Op.ne]: null } }
             }),
 
-            // Pending Exits (all visits still pending exit, any status)
             Visits.count({
-                where: {
-                    ...dateRangeWhere,
-                    exit_timestamp: null
-                }
+                where: { ...dateRangeWhere, exit_timestamp: null }
             }),
 
-            // All Entries (all visits in period, any status)
             Visits.count({ where: dateRangeWhere }),
 
-            // Manual and Mpesa revenue/exits breakdown (only COMPLETED transactions)
-            // This is the source of truth for collected revenue and paid exit counts
             Transaction.findAll({
                 where: {
                     status: 'COMPLETED',
-                    Transaction_timestamp: {
-                        [Op.between]: [startDate, endDate]
-                    }
+                    createdAt: { [Op.between]: [startDate, endDate] } // Standardized to createdAt
                 },
                 attributes: [
                     [fn('SUM', literal(`CASE WHEN transaction_code LIKE 'MANUAL_PAY_%' THEN amount ELSE 0 END`)), 'manual_revenue'],
@@ -893,26 +999,19 @@ router.get('/summary', authenticateToken, async (req, res) => {
                 raw: true
             }),
 
-            // VIP Logs count for tenant exits in the period
             require('../model/Viplogs').count({
-                where: {
-                    createdAt: {
-                        [Op.between]: [startDate, endDate]
-                    }
-                }
+                where: dateRangeWhere
             })
         ]);
 
         const transactionData = manualAndMpesaData[0] || {};
-        
-        // Collected revenue is the sum of manual + mpesa revenues from Transaction table
         const manualRevenue = Number(transactionData.manual_revenue || 0);
         const mpesaRevenue = Number(transactionData.mpesa_revenue || 0);
         const collectedRevenue = manualRevenue + mpesaRevenue;
         const manualExits = Number(transactionData.manual_exits || 0);
         const mpesaExits = Number(transactionData.mpesa_exits || 0);
         const paidExits = manualExits + mpesaExits;
-        const unpaidExits = totalExits - paidExits; // Exits without completed payments
+        const unpaidExits = Number(totalExits || 0) - paidExits;
 
         res.json({
             time_range: {
@@ -935,5 +1034,6 @@ router.get('/summary', authenticateToken, async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch summary analytics' });
     }
 });
+
 
 module.exports = router;

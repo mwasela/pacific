@@ -3,11 +3,46 @@ const router = express.Router();
 const { Op, col } = require('sequelize');
 const Transaction = require('../model/Transaction');
 const Visits = require('../model/Visits');
+const { getTransactionsByVisitRange } = require('../services/transactionService');
+const nodecron = require('node-cron');
 const AuthenticateToken = require('../middleware/auth');
 
 
+const updateVisitStatus = async () => {
+    try {
+        console.log('running broken visits crone');
+        const openVisits = await Visits.findAll({
+            where: {
+                paid_status: '1' // Open visits
+            }
+        });
+
+        for (const visit of openVisits) {
+            const transaction = await Transaction.findOne({
+                where: {
+                    visit_id: visit.id,
+                    transaction_code: {
+                        [Op.ne]: null // Ensure transaction_code is not null
+                    }
+                }
+            });
+            if (transaction) {
+                visit.paid_status = '0';
+                await visit.save();
+            }
+        }
+    } catch (error) {
+        console.error("Error updating visit status:", error);
+    }
+};
+
+// Schedule the cron job to run every 10 minutes
+nodecron.schedule('*/10 * * * *', updateVisitStatus);
+
+
+
 router.get('/transactions', AuthenticateToken, async (req, res) => {
-    
+
     try {
         const hasLimitParam = typeof req.query.limit !== 'undefined';
         const hasPageSizeParam = typeof req.query.pageSize !== 'undefined';
@@ -188,7 +223,7 @@ router.get('/transactions', AuthenticateToken, async (req, res) => {
 
 
 router.get('/transactions/range', AuthenticateToken, async (req, res) => {
-    
+
     try {
         const fromRaw = typeof req.query.from === 'string' ? req.query.from.trim() : undefined;
         const toRaw = typeof req.query.to === 'string' ? req.query.to.trim() : undefined;
@@ -258,7 +293,7 @@ router.get('/transactions/range', AuthenticateToken, async (req, res) => {
             }
 
             paidStatusWhere = {
-                paid_status: Number(paidStatusRaw)
+                paid_status: paidStatusRaw // keeps '0' or '1' as a String
             };
         }
 
@@ -508,10 +543,10 @@ router.get('/transactions/range', AuthenticateToken, async (req, res) => {
     }
 });
 
-//get all visits
+
 router.get('/visits', AuthenticateToken, async (req, res) => {
     try {
-        const visits = await Visits.findAll();  
+        const visits = await Visits.findAll();
         res.json(visits);
     } catch (error) {
         console.error("Error fetching visits:", error);
@@ -523,7 +558,7 @@ router.get('/visits', AuthenticateToken, async (req, res) => {
 //edit a visit
 router.put('/visits/:id', AuthenticateToken, async (req, res) => {
     const visitId = req.params.id;
-    const { vehicle_number, ticket_id, amount } = req.body; 
+    const { vehicle_number, ticket_id, amount } = req.body;
 
     try {
         const visit = await Visits.findByPk(visitId);
