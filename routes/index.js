@@ -66,15 +66,9 @@ const calculateChargeFromTimestamp = (startTimestamp, endTimestamp = new Date())
     const elapsedMinutes = Math.max(0, Math.ceil(elapsedTime / (1000 * 60)));
     const elapsedHours = Math.max(0, Math.ceil(elapsedMinutes / 60));
 
-    const endNairobiMs = endTime.getTime() + NAIROBI_UTC_OFFSET_MS;
-    const startNairobiMs = effectiveStartTime.getTime() + NAIROBI_UTC_OFFSET_MS;
-    const endNairobiDay = Math.floor(endNairobiMs / DAY_IN_MS);
-    const startNairobiDay = Math.floor(startNairobiMs / DAY_IN_MS);
-    const isOvernight = elapsedTime > 0 && endNairobiDay > startNairobiDay;
-
     let amount;
-    if (isOvernight) {
-        const overnightDays = endNairobiDay - startNairobiDay;
+    if (elapsedHours > 24) {
+        const overnightDays = Math.ceil(elapsedHours / 24);
         amount = overnightDays * OVERNIGHT_BASE_RATE;
     } else if (elapsedMinutes <= FREE_MINUTES) {
         amount = 0;
@@ -264,14 +258,14 @@ router.post('/mpesa/callback/vip', async (req, res) => {
     const callbackData = req.body.Body.stkCallback;
     const checkoutID = callbackData.CheckoutRequestID;
     const resultCode = callbackData.ResultCode;
-    
+
     if (resultCode === 0) {
         const metadata = callbackData.CallbackMetadata.Item;
         const getValue = (name) => metadata.find(item => item.Name === name)?.Value;
-        
+
         const mpesaReceipt = getValue('MpesaReceiptNumber');
         const mpesaPaymentDate = parseMpesaTransactionDate(getValue('TransactionDate'));
-        
+
         try {
             const transaction = await Vippayments.findOne({ where: { checkoutID } });
             if (!transaction) {
@@ -307,7 +301,7 @@ router.post('/mpesa/callback/vip', async (req, res) => {
 
         console.log(`VIP Transaction ${checkoutID} failed with code ${resultCode}`);
     }
-    
+
     res.json({ ResultCode: 0, ResultDesc: "Accepted" });
 
 });
@@ -338,7 +332,7 @@ router.post('/mpesa/callback', async (req, res) => {
             }
 
             const confeeRecord = await Confee.findOne({ where: { visit_id: transaction.visit_id } });
-            
+
             if (confeeRecord) {
                 confeeRecord.status = 1;
                 await confeeRecord.save();
@@ -783,7 +777,7 @@ router.post('/api/vehicle/exit', async (req, res) => {
         //update visit record with exit timestamp and calculate hours and amount
         const durationMs = exit_timestamp - visit.visit_timestamp;
         const durationHours = Math.ceil(durationMs / (1000 * 60 * 60));
-      
+
 
         visit.exit_timestamp = exit_timestamp;
         visit.hours = durationHours;
@@ -833,8 +827,8 @@ router.post('/visits/manual', async (req, res) => {
     //if manual_pay is true, mark as aid and update everything as if it was paid via mpesa to allow vehicle to exit when called via /exit
     try {
         const visit = await Visits.findOne({
-            where: { ticket_id: ticketIdStr},
-                //status: 1 },
+            where: { ticket_id: ticketIdStr },
+            //status: 1 },
             order: [['visit_timestamp', 'DESC']]
         });
 

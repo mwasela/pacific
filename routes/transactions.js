@@ -324,7 +324,7 @@ router.get('/transactions/range', AuthenticateToken, async (req, res) => {
             }
 
             visitStatusWhere = {
-                status: visitStatusRaw
+                paid_status: visitStatusRaw
             };
         }
 

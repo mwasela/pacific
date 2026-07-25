@@ -60,15 +60,9 @@ const calculateChargeFromVisitTime = (visitTimestamp, now = new Date()) => {
     const elapsedMinutes = Math.max(0, Math.ceil(elapsedTime / (1000 * 60)));
     const elapsedHours = Math.max(0, Math.ceil(elapsedMinutes / 60));
 
-    const nowNairobiMs = now.getTime() + NAIROBI_UTC_OFFSET_MS;
-    const visitNairobiMs = effectiveVisitTime.getTime() + NAIROBI_UTC_OFFSET_MS;
-    const nowNairobiDay = Math.floor(nowNairobiMs / DAY_IN_MS);
-    const visitNairobiDay = Math.floor(visitNairobiMs / DAY_IN_MS);
-    const isOvernight = elapsedTime > 0 && nowNairobiDay > visitNairobiDay;
-
     let amount;
-    if (isOvernight) {
-        const overnightDays = nowNairobiDay - visitNairobiDay;
+    if (elapsedHours > 24) {
+        const overnightDays = Math.ceil(elapsedHours / 24);
         amount = overnightDays * OVERNIGHT_BASE_RATE;
     } else if (elapsedMinutes <= FREE_MINUTES) {
         amount = 0;
