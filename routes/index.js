@@ -269,41 +269,57 @@ router.post('/mpesa/callback/vip', async (req, res) => {
         try {
             const transaction = await Vippayments.findOne({ where: { checkoutID } });
             if (!transaction) {
-                console.error("Transaction not found for checkoutID:", checkoutID);
+                console.error("VIP Transaction not found for checkoutID:", checkoutID);
                 return res.status(404).json({ error: "Transaction not found" });
             }
 
-            transaction.status = 'COMPLETED';
-            transaction.transaction_code = mpesaReceipt;
-            transaction.payment_timestamp = mpesaPaymentDate || new Date();
-            await transaction.save();
-
-
-            const VIPRecord = await VIP.findOne({ where: { vehicle_number: transaction.number_plate } });
-            if (VIPRecord) {
-                //add 30 days to todays date for vip expiry
-                VIPRecord.vip_expiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-                await VIPRecord.save();
-                console.log(`VIP status updated for plate ${transaction.number_plate}, VIP expiry set to ${VIPRecord.vip_expiry}`);
-            } else {
-                console.error("VIP record not found for plate:", transaction.number_plate);
+            // Validate number_plate exists before proceeding
+            if (!transaction.number_plate) {
+                console.error("VIP Transaction has no number_plate associated:", checkoutID);
+                return res.status(400).json({ error: "Invalid transaction: no number_plate" });
             }
 
-            console.log(`VIP Transaction ${mpesaReceipt} saved for plate ${transaction.number_plate}`);
+            // Update VIP payment transaction
+            try {
+                transaction.status = 'COMPLETED';
+                transaction.transaction_code = mpesaReceipt;
+                transaction.payment_timestamp = mpesaPaymentDate || new Date();
+                await transaction.save();
+                console.log(`VIP Transaction ${mpesaReceipt} saved for plate ${transaction.number_plate}`);
+            } catch (transactionError) {
+                console.error(`Failed to save VIP transaction for checkoutID ${checkoutID}:`, transactionError.message);
+                throw transactionError;
+            }
+
+            // Update VIP record with expiry
+            try {
+                const VIPRecord = await VIP.findOne({ where: { vehicle_number: transaction.number_plate } });
+                if (VIPRecord) {
+                    // Add 30 days to today's date for vip expiry
+                    VIPRecord.vip_expiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                    await VIPRecord.save();
+                    console.log(`VIP status updated for plate ${transaction.number_plate}, VIP expiry set to ${VIPRecord.vip_expiry}`);
+                } else {
+                    console.error("VIP record not found for plate:", transaction.number_plate);
+                    // Don't throw - payment transaction is already recorded
+                }
+            } catch (vipError) {
+                console.error(`Failed to update VIP record for plate ${transaction.number_plate}:`, vipError.message);
+                // Don't throw - payment transaction is already recorded
+            }
+
         } catch (dbError) {
-            console.error("Database Error:", dbError.message);
+            console.error("Database Error during VIP M-Pesa callback:", dbError.message, dbError.stack);
         }
     } else {
-        //fs write
+        // Failed transaction - log to file
         fs.appendFile('vip_failed_transactions.log', `VIP Transaction ${checkoutID} failed with code ${resultCode}\n`, (err) => {
-            if (err) console.error("Error writing to log file:", err);
+            if (err) console.error("Error writing to VIP failed transactions log:", err);
         });
-
         console.log(`VIP Transaction ${checkoutID} failed with code ${resultCode}`);
     }
 
     res.json({ ResultCode: 0, ResultDesc: "Accepted" });
-
 });
 
 
@@ -331,37 +347,64 @@ router.post('/mpesa/callback', async (req, res) => {
                 return res.status(404).json({ error: "Transaction not found" });
             }
 
-            const confeeRecord = await Confee.findOne({ where: { visit_id: transaction.visit_id } });
-
-            if (confeeRecord) {
-                confeeRecord.status = 1;
-                await confeeRecord.save();
-                console.log(`Confee record updated for visit_id ${transaction.visit_id}`);
-            } else {
-                console.error("Confee record not found for visit_id:", transaction.visit_id);
+            // Validate visit_id exists before proceeding
+            if (!transaction.visit_id) {
+                console.error("Transaction has no visit_id associated:", checkoutID);
+                return res.status(400).json({ error: "Invalid transaction: no visit_id" });
             }
 
-            // Update record
+            // Update transaction first
             transaction.status = 'COMPLETED';
             transaction.transaction_code = mpesaReceipt;
             transaction.payment_timestamp = mpesaPaymentDate || new Date();
-            await transaction.save();
-
-            console.log(`Transaction ${mpesaReceipt} saved for plate ${transaction.number_plate}`);
-
-            //update visit record to mark as paid
-            const visit = await Visits.findOne({ where: { id: transaction.visit_id } });
-            if (visit) {
-                visit.paid_status = '0'; // Mark as paid
-                await visit.save();
-                console.log(`Visit ${visit.id} marked as paid.`);
-            } else {
-                console.error("Visit not found for visit_id:", transaction.visit_id);
+            
+            try {
+                await transaction.save();
+                console.log(`Transaction ${mpesaReceipt} saved for plate ${transaction.number_plate}`);
+            } catch (transactionError) {
+                console.error(`Failed to save transaction for checkoutID ${checkoutID}:`, transactionError.message);
+                throw transactionError;
             }
 
+            // Update Confee record
+            try {
+                const confeeRecord = await Confee.findOne({ where: { visit_id: transaction.visit_id } });
+                if (confeeRecord) {
+                    confeeRecord.status = 1;
+                    await confeeRecord.save();
+                    console.log(`Confee record updated for visit_id ${transaction.visit_id}`);
+                } else {
+                    console.warn(`Confee record not found for visit_id: ${transaction.visit_id}`);
+                }
+            } catch (confeeError) {
+                console.error(`Failed to update Confee record for visit_id ${transaction.visit_id}:`, confeeError.message);
+                // Don't throw - Confee update is non-critical
+            }
+
+            // Update visit record to mark as paid (paid_status = '0' means paid)
+            try {
+                const visit = await Visits.findOne({ where: { id: transaction.visit_id } });
+                
+                if (!visit) {
+                    console.error("Visit not found for visit_id:", transaction.visit_id);
+                    // Don't throw - we've already updated the transaction
+                } else {
+                    // Only update if status changed to avoid unnecessary database hits
+                    if (visit.paid_status !== '0') {
+                        visit.paid_status = '0'; // Mark as paid
+                        await visit.save();
+                        console.log(`Visit ${visit.id} marked as paid. Previous status: ${visit.paid_status}`);
+                    } else {
+                        console.log(`Visit ${visit.id} already marked as paid.`);
+                    }
+                }
+            } catch (visitError) {
+                console.error(`Failed to update visit paid_status for visit_id ${transaction.visit_id}:`, visitError.message);
+                // Don't throw - we've already updated the transaction
+            }
 
         } catch (dbError) {
-            console.error("Database or Barrier Error:", dbError.message);
+            console.error("Database Error during M-Pesa callback processing:", dbError.message, dbError.stack);
         }
     } else {
         console.log(`Transaction ${checkoutID} failed with code ${resultCode}`);
