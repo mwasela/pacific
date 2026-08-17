@@ -10,7 +10,8 @@ const Confee = sequelizeInstance.define('Confee', {
     },
     visit_id: {
         type: DataTypes.INTEGER,
-        allowNull: false
+        allowNull: false,
+        unique: true
     },
     con_fee: {
         type: DataTypes.INTEGER,

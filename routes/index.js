@@ -67,8 +67,8 @@ const calculateChargeFromTimestamp = (startTimestamp, endTimestamp = new Date())
     const elapsedHours = Math.max(0, Math.ceil(elapsedMinutes / 60));
 
     let amount;
-    if (elapsedHours > 24) {
-        const overnightDays = Math.ceil(elapsedHours / 24);
+    if (elapsedTime >= DAY_IN_MS) {
+        const overnightDays = Math.max(1, Math.floor(elapsedTime / DAY_IN_MS));
         amount = overnightDays * OVERNIGHT_BASE_RATE;
     } else if (elapsedMinutes <= FREE_MINUTES) {
         amount = 0;
@@ -368,11 +368,13 @@ router.post('/mpesa/callback', async (req, res) => {
 
             // Update Confee record
             try {
-                const confeeRecord = await Confee.findOne({ where: { visit_id: transaction.visit_id } });
-                if (confeeRecord) {
-                    confeeRecord.status = 1;
-                    await confeeRecord.save();
-                    console.log(`Confee record updated for visit_id ${transaction.visit_id}`);
+                const [updatedRows] = await Confee.update(
+                    { status: 1 },
+                    { where: { visit_id: transaction.visit_id } }
+                );
+
+                if (updatedRows > 0) {
+                    console.log(`Confee records updated (${updatedRows}) for visit_id ${transaction.visit_id}`);
                 } else {
                     console.warn(`Confee record not found for visit_id: ${transaction.visit_id}`);
                 }

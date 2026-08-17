@@ -61,8 +61,8 @@ const calculateChargeFromVisitTime = (visitTimestamp, now = new Date()) => {
     const elapsedHours = Math.max(0, Math.ceil(elapsedMinutes / 60));
 
     let amount;
-    if (elapsedHours > 24) {
-        const overnightDays = Math.ceil(elapsedHours / 24);
+    if (elapsedTime >= DAY_IN_MS) {
+        const overnightDays = Math.max(1, Math.floor(elapsedTime / DAY_IN_MS));
         amount = overnightDays * OVERNIGHT_BASE_RATE;
     } else if (elapsedMinutes <= FREE_MINUTES) {
         amount = 0;
@@ -80,6 +80,39 @@ const calculateChargeFromVisitTime = (visitTimestamp, now = new Date()) => {
         amount,
         elapsedHours
     };
+};
+
+const upsertConfeeForVisit = async (visitId, conFeeAmount) => {
+    const [confeeRecord, created] = await Confee.findOrCreate({
+        where: { visit_id: visitId },
+        defaults: {
+            visit_id: visitId,
+            con_fee: conFeeAmount,
+            status: 0
+        }
+    });
+
+    if (created) {
+        return confeeRecord;
+    }
+
+    let changed = false;
+    if (Number(confeeRecord.con_fee) !== Number(conFeeAmount)) {
+        confeeRecord.con_fee = conFeeAmount;
+        changed = true;
+    }
+
+    // Keep paid records as paid; otherwise mark as pending while payment is in-flight.
+    if (Number(confeeRecord.status) !== 1 && Number(confeeRecord.status) !== 0) {
+        confeeRecord.status = 0;
+        changed = true;
+    }
+
+    if (changed) {
+        await confeeRecord.save();
+    }
+
+    return confeeRecord;
 };
 
 const recalculatePendingVisitsCharges = async () => {
@@ -449,12 +482,8 @@ router.post('/pay', getAccessToken, async (req, res) => {
         transaction.checkoutID = stkResponse.data.CheckoutRequestID;
         await transaction.save();
 
-        // Create Confee record only after successful STK push
-        await Confee.create({
-            visit_id: visit.id,
-            con_fee: con_fee,
-            status: 0
-        });
+        // Keep a single Confee record per visit_id.
+        await upsertConfeeForVisit(visit.id, con_fee);
 
         res.status(200).json({
             message: "STK Push initiated",
@@ -593,12 +622,8 @@ router.post('/unpaid/stk', getAccessToken, async (req, res) => {
         transaction.checkoutID = stkPushResponse.CheckoutRequestID;
         await transaction.save();
 
-        // Create Confee record only after successful STK push
-        await Confee.create({
-            visit_id: visit.id,
-            con_fee: con_fee,
-            status: 0
-        });
+        // Keep a single Confee record per visit_id.
+        await upsertConfeeForVisit(visit.id, con_fee);
 
         res.json({ message: "STK Push triggered for unpaid visit." });
     } catch (error) {
