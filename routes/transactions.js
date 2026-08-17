@@ -121,14 +121,14 @@ router.get('/transactions', AuthenticateToken, async (req, res) => {
         let visitWhere;
         if (!numberPlateQuery) {
             const now = new Date();
-            const thirtyDaysAgo = new Date(now);
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            const sevenDaysAgo = new Date(now);
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
             visitWhere = {
                 [Op.and]: [
                     {
                         createdAt: {
-                            [Op.between]: [thirtyDaysAgo, now]
+                            [Op.between]: [sevenDaysAgo, now]
                         }
                     },
                     // { status: '0' },
@@ -262,7 +262,7 @@ router.get('/transactions/range', AuthenticateToken, async (req, res) => {
         if (typeof fromRaw === 'undefined' && typeof toRaw === 'undefined') {
             toDate = new Date();
             fromDate = new Date(toDate);
-            fromDate.setDate(fromDate.getDate() - 30);
+            fromDate.setDate(fromDate.getDate() - 7);
         }
 
         let visitDateWhere;
