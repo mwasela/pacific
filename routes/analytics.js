@@ -8,6 +8,8 @@ const Viplogs = require('../model/Viplogs');
 const { getTransactionsByVisitRange } = require('../services/transactionService');
 const authenticateToken = require('../middleware/auth');
 
+const MPESA_TRANSACTION_CONDITION = `transaction_code IS NOT NULL AND transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' AND transaction_code NOT LIKE 'FREE_EXIT_%'`;
+
 // Helper: Get current time in Nairobi (UTC+3)
 const getNairobiNow = () => {
     const now = new Date();
@@ -188,7 +190,7 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
                 attributes: [
                     [fn('SUM', col('amount')), 'total_amount'],
                     [fn('SUM', literal(`CASE WHEN transaction_code LIKE 'MANUAL_PAY_%' THEN amount ELSE 0 END`)), 'manual_revenue'],
-                    [fn('SUM', literal(`CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN amount ELSE 0 END`)), 'mpesa_revenue']
+                    [fn('SUM', literal(`CASE WHEN ${MPESA_TRANSACTION_CONDITION} THEN amount ELSE 0 END`)), 'mpesa_revenue']
                 ],
                 raw: true
             }),
@@ -637,8 +639,8 @@ router.get('/daily-income', authenticateToken, async (req, res) => {
                 [fn('SUM', col('amount')), 'total_income'],
                 [fn('COUNT', col('id')), 'total_transactions'],
                 [fn('SUM', literal(`CASE WHEN transaction_code LIKE 'MANUAL_PAY_%' THEN amount ELSE 0 END`)), 'total_manual_payments'],
-                [fn('SUM', literal(`CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN amount ELSE 0 END`)), 'total_mpesa_payments'],
-                [fn('COUNT', literal(`DISTINCT CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN number_plate END`)), 'unique_number_plates'],
+                [fn('SUM', literal(`CASE WHEN ${MPESA_TRANSACTION_CONDITION} THEN amount ELSE 0 END`)), 'total_mpesa_payments'],
+                [fn('COUNT', literal(`DISTINCT CASE WHEN ${MPESA_TRANSACTION_CONDITION} THEN number_plate END`)), 'unique_number_plates'],
             ],
             raw: true
         });
@@ -992,9 +994,9 @@ router.get('/summary', authenticateToken, async (req, res) => {
                 },
                 attributes: [
                     [fn('SUM', literal(`CASE WHEN transaction_code LIKE 'MANUAL_PAY_%' THEN amount ELSE 0 END`)), 'manual_revenue'],
-                    [fn('SUM', literal(`CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN amount ELSE 0 END`)), 'mpesa_revenue'],
+                    [fn('SUM', literal(`CASE WHEN ${MPESA_TRANSACTION_CONDITION} THEN amount ELSE 0 END`)), 'mpesa_revenue'],
                     [fn('COUNT', literal(`CASE WHEN transaction_code LIKE 'MANUAL_PAY_%' THEN 1 END`)), 'manual_exits'],
-                    [fn('COUNT', literal(`CASE WHEN transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' THEN 1 END`)), 'mpesa_exits']
+                    [fn('COUNT', literal(`CASE WHEN ${MPESA_TRANSACTION_CONDITION} THEN 1 END`)), 'mpesa_exits']
                 ],
                 raw: true
             }),
