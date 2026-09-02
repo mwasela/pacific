@@ -21,13 +21,19 @@ router.get('/', AuthenticateToken, async (req, res) => {
 
         const queryOptions = {
             order: [[sortField, sortDirection]],
+            include: [{
+                model: VIP
+            }],
         };
 
         if (limit && limit > 0) {
             queryOptions.limit = limit;
         }
 
-        const vipLogs = await Viplogs.findAll(queryOptions);
+        const vipLogs = await Viplogs.findAll(
+            
+            queryOptions
+        );
         res.json(vipLogs);
     } catch (error) {
         console.error("Error fetching VIP logs:", error);

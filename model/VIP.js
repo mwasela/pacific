@@ -16,6 +16,11 @@ const VIP = sequelizeInstance.define('VIP', {
         type: DataTypes.STRING,
         allowNull: false
     },
+    card_number: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        //unique: true
+    },
     email: {
         type: DataTypes.STRING,
         allowNull: false,

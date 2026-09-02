@@ -7,6 +7,7 @@ const Visits = require('../model/Visits');
 const Viplogs = require('../model/Viplogs');
 const { getTransactionsByVisitRange } = require('../services/transactionService');
 const authenticateToken = require('../middleware/auth');
+const moment = require('moment');
 
 const MPESA_TRANSACTION_CONDITION = `transaction_code IS NOT NULL AND transaction_code NOT LIKE 'MANUAL_PAY_%' AND transaction_code NOT LIKE 'VIP%' AND transaction_code NOT LIKE 'FREE_EXIT_%'`;
 
@@ -154,6 +155,7 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
         console.log('Dashboard date range:', dateRangeDebug);
         console.log('Transaction date range:', transactionStartDate?.toISOString(), 'to', transactionEndDate?.toISOString());
 
+
         // 3. Combine filters safely
         const closedPaidVisitWhere = {
             ...visitWhere,
@@ -230,7 +232,7 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
 
         const txData = transactionData[0] || {};
         const totalAmount = Number(txData.total_amount || 0);
-        
+
         console.log('Transaction query result:', {
             total_amount: txData.total_amount,
             manual_revenue: txData.manual_revenue,
@@ -484,7 +486,7 @@ router.get('/revenue', authenticateToken, async (req, res) => {
         // Date range filter on Transaction_timestamp
         let { from, to } = req.query;
         let startDate, endDate;
-        
+
         if (from && to) {
             const fromDate = parseQueryDate(from);
             const toDate = parseQueryDate(to, true);
@@ -505,11 +507,11 @@ router.get('/revenue', authenticateToken, async (req, res) => {
             startDate = new Date(now);
             startDate.setDate(startDate.getDate() - 30);
         }
-        
-        transactionFilters.push({ 
-            Transaction_timestamp: { 
-                [Op.between]: [startDate, endDate] 
-            } 
+
+        transactionFilters.push({
+            Transaction_timestamp: {
+                [Op.between]: [startDate, endDate]
+            }
         });
 
         // Number plate filter (direct on Transaction)
@@ -907,7 +909,7 @@ const getPeriodDateRange = (period) => {
 //         ]);
 
 //         const transactionData = manualAndMpesaData[0] || {};
-        
+
 //         // Collected revenue is the sum of manual + mpesa revenues from Transaction table
 //         const manualRevenue = Number(transactionData.manual_revenue || 0);
 //         const mpesaRevenue = Number(transactionData.mpesa_revenue || 0);
@@ -963,6 +965,22 @@ router.get('/summary', authenticateToken, async (req, res) => {
             startDate.setHours(0, 0, 0, 0);
         }
 
+
+        const vipLogs = await Viplogs.findAll({
+            where: {
+                createdAt: {
+                    [Op.between]: [startDate, endDate]
+                }
+            }
+        });
+
+
+        //console.log("startDate - endate", startDate, endDate);
+
+        const vipLogsnumber = vipLogs.length;
+
+        //console.log('VIP Logs Number:', vipLogsnumber);
+
         // Standardized createdAt filter to match base endpoint behavior
         const dateRangeWhere = {
             createdAt: {
@@ -1000,8 +1018,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
                 ],
                 raw: true
             }),
-
-            require('../model/Viplogs').count({
+            Viplogs.count({
                 where: dateRangeWhere
             })
         ]);
@@ -1029,7 +1046,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
             mpesa_revenue: mpesaRevenue,
             manual_exits: manualExits,
             mpesa_exits: mpesaExits,
-            tenant_exits: Number(vipLogsCount || 0)
+            tenant_exits: Number(vipLogsnumber || 0)
         });
     } catch (error) {
         console.error('Error fetching summary analytics:', error);
